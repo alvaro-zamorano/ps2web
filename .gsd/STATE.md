@@ -1,7 +1,7 @@
 # State
 
 ## Current Phase
-F1 (en curso). W1/W2/W3 hechos. Fix pusheado (960c3b0, run 29036341288): smoke F0 endurecido (poll de crossOriginIsolated) y desacoplado de harness en jobs propios. Esperando run para generar baseline (W4).
+F1 COMPLETA. Baseline en docs/BASELINE.md + bench/results/baseline.json (cube 56.8fps, 94.8% realtime). Smoke arreglado (testMatch smoke.spec.js — antes corría bench sin fixture). Checkpoint de rama F3 = **Rama A**. Listo para F2 (threads+SIMD) o F5 (OPFS).
 
 ## Completed
 - 2026-07-09: `.gsd/` scaffolding desde §5 + master plan en docs/.
@@ -14,6 +14,8 @@ F1 (en curso). W1/W2/W3 hechos. Fix pusheado (960c3b0, run 29036341288): smoke F
 
 - 2026-07-09: F1 W2 — overlay de métricas (window.__ps2web_metrics: fps/emuSpeedPct/msPerFrame/frameHash) + hook de boot headless. Frontend-only (sin tocar C++), sobre getFrames()/clearStats() ya existentes.
 - 2026-07-09: F1 W3 — harness Playwright (tests/harness) + fixture cube (ps2sdk AFL v2.0) compilado en CI (job fixtures, imagen ps2dev). Workflow con 3 jobs: fixtures, build (+overlay), harness.
+
+- 2026-07-09: F1 W4 — BASELINE (cube: 56.8 avgFps, 94.8% realtime, p95 17.86ms; rig ci-headless-swiftshader). Bug de smoke resuelto: playwright.config.js corría TODOS los specs (incl. harness/bench sin fixture) → testMatch a smoke.spec.js.
 
 ## Decisions Log
 - 2026-07-08: D1..D12 bloqueadas (docs/PS2WEB-MASTER-PLAN.md §1).

@@ -2,6 +2,7 @@
 const { defineConfig } = require('@playwright/test');
 module.exports = defineConfig({
   testDir: './tests',
+  testMatch: 'smoke.spec.js', // ONLY the F0 smoke; harness has its own config
   timeout: 60000,
   reporter: [['list']],
   use: { baseURL: 'http://localhost:8080', headless: true },

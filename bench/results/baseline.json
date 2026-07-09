@@ -1,0 +1,178 @@
+{
+  "fixture": "cube",
+  "rig": "ci-headless-swiftshader",
+  "seconds": 20,
+  "warmup": 6,
+  "avgFps": 56.8,
+  "minFps": 56,
+  "maxFps": 57.94,
+  "avgEmuSpeedPct": 94.8,
+  "p95MsPerFrame": 17.86,
+  "fixtureBytes": 174900,
+  "frameHashes": [
+    3820964002,
+    3820964002,
+    3820964002,
+    3820964002,
+    3820964002,
+    3820964002,
+    3820964002,
+    3820964002,
+    3820964002,
+    3820964002,
+    3820964002,
+    3820964002,
+    3820964002,
+    3820964002,
+    3820964002,
+    3820964002,
+    3820964002,
+    3820964002,
+    3820964002,
+    3820964002
+  ],
+  "samples": [
+    {
+      "fps": 57.94,
+      "emuSpeedPct": 96.7,
+      "msPerFrame": 17.26,
+      "frameHash": 3820964002,
+      "ts": 1783617748648
+    },
+    {
+      "fps": 57.06,
+      "emuSpeedPct": 95.2,
+      "msPerFrame": 17.52,
+      "frameHash": 3820964002,
+      "ts": 1783617749648
+    },
+    {
+      "fps": 56.99,
+      "emuSpeedPct": 95.1,
+      "msPerFrame": 17.55,
+      "frameHash": 3820964002,
+      "ts": 1783617750647
+    },
+    {
+      "fps": 57.01,
+      "emuSpeedPct": 95.1,
+      "msPerFrame": 17.54,
+      "frameHash": 3820964002,
+      "ts": 1783617751650
+    },
+    {
+      "fps": 57,
+      "emuSpeedPct": 95.1,
+      "msPerFrame": 17.54,
+      "frameHash": 3820964002,
+      "ts": 1783617752643
+    },
+    {
+      "fps": 57,
+      "emuSpeedPct": 95.1,
+      "msPerFrame": 17.54,
+      "frameHash": 3820964002,
+      "ts": 1783617753640
+    },
+    {
+      "fps": 57,
+      "emuSpeedPct": 95.1,
+      "msPerFrame": 17.54,
+      "frameHash": 3820964002,
+      "ts": 1783617754646
+    },
+    {
+      "fps": 57,
+      "emuSpeedPct": 95.1,
+      "msPerFrame": 17.54,
+      "frameHash": 3820964002,
+      "ts": 1783617755657
+    },
+    {
+      "fps": 57,
+      "emuSpeedPct": 95.1,
+      "msPerFrame": 17.54,
+      "frameHash": 3820964002,
+      "ts": 1783617756640
+    },
+    {
+      "fps": 57,
+      "emuSpeedPct": 95.1,
+      "msPerFrame": 17.54,
+      "frameHash": 3820964002,
+      "ts": 1783617757646
+    },
+    {
+      "fps": 57,
+      "emuSpeedPct": 95.1,
+      "msPerFrame": 17.54,
+      "frameHash": 3820964002,
+      "ts": 1783617758642
+    },
+    {
+      "fps": 57,
+      "emuSpeedPct": 95.1,
+      "msPerFrame": 17.54,
+      "frameHash": 3820964002,
+      "ts": 1783617759641
+    },
+    {
+      "fps": 57,
+      "emuSpeedPct": 95.1,
+      "msPerFrame": 17.54,
+      "frameHash": 3820964002,
+      "ts": 1783617760644
+    },
+    {
+      "fps": 56,
+      "emuSpeedPct": 93.4,
+      "msPerFrame": 17.86,
+      "frameHash": 3820964002,
+      "ts": 1783617761640
+    },
+    {
+      "fps": 56.96,
+      "emuSpeedPct": 95,
+      "msPerFrame": 17.56,
+      "frameHash": 3820964002,
+      "ts": 1783617762646
+    },
+    {
+      "fps": 56.04,
+      "emuSpeedPct": 93.5,
+      "msPerFrame": 17.84,
+      "frameHash": 3820964002,
+      "ts": 1783617763640
+    },
+    {
+      "fps": 56,
+      "emuSpeedPct": 93.4,
+      "msPerFrame": 17.86,
+      "frameHash": 3820964002,
+      "ts": 1783617764641
+    },
+    {
+      "fps": 57,
+      "emuSpeedPct": 95.1,
+      "msPerFrame": 17.54,
+      "frameHash": 3820964002,
+      "ts": 1783617765646
+    },
+    {
+      "fps": 56,
+      "emuSpeedPct": 93.4,
+      "msPerFrame": 17.86,
+      "frameHash": 3820964002,
+      "ts": 1783617766640
+    },
+    {
+      "fps": 56,
+      "emuSpeedPct": 93.4,
+      "msPerFrame": 17.86,
+      "frameHash": 3820964002,
+      "ts": 1783617767640
+    }
+  ],
+  "upstream": "b72057621e55608e0b10f14ee9e54d56fd6cc99c",
+  "generatedAt": "2026-07-09T17:22:47.823Z"
+}

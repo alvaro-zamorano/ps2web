@@ -5,6 +5,29 @@ on:
   workflow_dispatch:
 
 jobs:
+  # --- F1: build a licensed homebrew ELF fixture (ps2sdk 'cube', AFL v2.0) ---
+  fixtures:
+    runs-on: ubuntu-latest
+    container: ps2dev/ps2dev:latest
+    steps:
+      - name: Checkout ps2web
+        uses: actions/checkout@v4
+      - name: Install make/git in image
+        run: apk add --no-cache make git || true
+      - name: Build cube fixture
+        run: |
+          echo "PS2SDK=$PS2SDK"
+          cd tests/fixtures/src/cube
+          make
+          test -f cube.elf
+          ls -la cube.elf
+      - name: Upload fixtures
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixtures
+          path: tests/fixtures/src/cube/cube.elf
+
+  # --- F0/F2: reproducible wasm build of Play! + PS2WEB frontend overlay ---
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -29,6 +52,10 @@ jobs:
 
       - name: Fixture license check (LEG-02)
         run: bash ps2web/tools/check_fixture_licenses.sh
+
+      - name: Apply PS2WEB frontend overlay
+        run: |
+          cp -rv ps2web/overlay/js/play_browser/src/. Play-/js/play_browser/src/
 
       - name: Setup Emscripten (pinned)
         uses: emscripten-core/setup-emsdk@v16
@@ -103,3 +130,49 @@ jobs:
           name: f0-smoke-screenshot
           path: ps2web/test-results
           if-no-files-found: ignore
+
+  # --- F1 W3/W4: run the metrics harness on the built site + fixture ---
+  harness:
+    needs: [build, fixtures]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout ps2web
+        uses: actions/checkout@v4
+
+      - name: Download site
+        uses: actions/download-artifact@v4
+        with:
+          name: ps2web-site
+          path: dist
+
+      - name: Download fixtures
+        uses: actions/download-artifact@v4
+        with:
+          name: fixtures
+          path: dist/fixtures
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.17
+
+      - name: Install + Playwright
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      - name: Run metrics harness (bench)
+        env:
+          BENCH_FIXTURE: cube
+          BENCH_SECONDS: "20"
+          BENCH_WARMUP: "6"
+        run: npx playwright test -c tests/harness/playwright.harness.config.js
+
+      - name: Upload bench results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: bench/results
+          if-no-files-found: warn

@@ -41,3 +41,23 @@ adelantan a F0. F0 prueba que el pipeline produce un artefacto desplegable y ais
   Los ficheros se espejan a Desktop/ps2web para visibilidad (solo lectura de git allí).
 - COOP `same-origin` + COEP `require-corp` en TODAS las rutas (serve.py y hosting F8).
 - CERO ROM/BIOS (LEG-01); fixtures solo homebrew OSS con licencia (LEG-02).
+
+---
+# Context — Phase F1 (añadido)
+
+### Modelo de cambios al código de Play! = overlay por copia (no fork aún, no git-apply)
+**Decisión**: los cambios de F1 al frontend (contrato de métricas, hook de boot headless)
+viven en `overlay/js/play_browser/src/` y el CI los COPIA sobre el árbol de Play! antes de
+compilar (`cp -r overlay/... Play-/...`). Robusto y rebasable; evita diffs frágiles y aplaza
+el fork real a F2 (primer cambio de C++/core).
+**Alternativas**: git-apply de patches (frágil ante cambios de upstream); fork completo ya
+(innecesario mientras solo tocamos ficheros frontend que sobreescribimos enteros).
+
+### Fixtures (TST-01/LEG-02)
+Fixture homebrew = sample `cube` del ps2sdk (AFL v2.0), fuente vendorizada en
+`tests/fixtures/src/cube/` con su `LICENSE`. Se compila a `cube.elf` en CI con la imagen
+`ps2dev/ps2dev` (job `fixtures`). CERO ROM/BIOS.
+
+### Baseline = rig CI headless (swiftshader)
+El baseline es una referencia RELATIVA en CI (WebGL software). El objetivo T1 (60 fps desktop)
+se mide a mano. F3 mide speedup contra el baseline CI, no contra T1.

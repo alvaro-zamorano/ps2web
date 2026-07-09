@@ -1,7 +1,7 @@
 # State
 
 ## Current Phase
-F3 W1 (diseño) DONE → docs/JIT-DESIGN.md (checkpoint type=decision). Prep hecho: fixture vu1 (CPU/VU-bound) compila en CI (cube.elf 174KB, vu1.elf 229KB). F3 W2 (implementación del JIT) está GATED por: (i) OK humano al diseño, (ii) fork real de jpd002/Play- en Wcoach24 (acción externa). Referencia de speedup = vu1 sobre build F2.
+F3 W1 (diseño) DONE. Fork de Play! BLOQUEADO: el token fine-grained no puede forkear ni crear repos (403 x2), solo push a repos existentes de Wcoach24. Fallback D10-compliant montado: serie de **patches versionados** en patches/ (main + patches/codegen/ para el submódulo), aplicados en CI. Listo para F3 W2 (batching). Fork real de GitHub queda opcional (requiere fork manual del usuario o token con Administration:write).
 
 ## Completed
 - 2026-07-09: `.gsd/` scaffolding desde §5 + master plan en docs/.
@@ -35,6 +35,7 @@ F3 W1 (diseño) DONE → docs/JIT-DESIGN.md (checkpoint type=decision). Prep hec
 - 2026-07-09: Cambios a Play! = overlay por copia en CI (overlay/ → Play-/js/play_browser/src). Fork real diferido a F2.
 
 ## Known Issues
+- 2026-07-09: Token no puede crear/forkear repos (403). F3 usa patches/ sobre Play! pinneado en vez de fork de GitHub. Para el objeto-fork real: fork manual en github.com/jpd002/Play- (botón Fork) o token con permiso Administration:write; luego se rewirea CI a la rama del fork.
 - Sandbox de sesión: sin toolchain y 3.8 GB RAM → no compila; git no opera sobre la carpeta
   montada (permisos .git). Mitigado: build en CI, git en clon local + PAT.
 - Riesgos abiertos de F0 (a validar con el run): build js de upstream verde en el commit

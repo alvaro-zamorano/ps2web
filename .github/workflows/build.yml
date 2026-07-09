@@ -54,6 +54,17 @@ jobs:
 
       - name: Apply F2 build flags (threads pool 8 + fixed 1GB memory)
         run: bash ps2web/tools/apply_f2_flags.sh Play-
+
+      - name: Apply F3 patches (main + CodeGen submodule)
+        run: |
+          shopt -s nullglob
+          for f in ps2web/patches/*.patch; do
+            echo "apply (main): $f"; git -C Play- apply --index "$GITHUB_WORKSPACE/$f"
+          done
+          for f in ps2web/patches/codegen/*.patch; do
+            echo "apply (codegen): $f"; git -C Play-/deps/CodeGen apply --index "$GITHUB_WORKSPACE/$f"
+          done
+          echo "patches applied (or none)."
       - name: Setup Emscripten (pinned)
         uses: emscripten-core/setup-emsdk@v16
         with:

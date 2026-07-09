@@ -1,7 +1,7 @@
 # State
 
 ## Current Phase
-F1 (en curso). W1 auditoría DONE. W2 métricas + W3 harness/fixture + jobs CI escritos y por pushear; W4 baseline se rellena del 1er run verde del job `harness`.
+F1 (en curso). W1/W2/W3 hechos. Fix pusheado (960c3b0, run 29036341288): smoke F0 endurecido (poll de crossOriginIsolated) y desacoplado de harness en jobs propios. Esperando run para generar baseline (W4).
 
 ## Completed
 - 2026-07-09: `.gsd/` scaffolding desde §5 + master plan en docs/.

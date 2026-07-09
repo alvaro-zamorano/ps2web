@@ -36,11 +36,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: ps2web
-
       - name: Read pinned upstream SHA
         id: pin
         run: echo "sha=$(cat ps2web/UPSTREAM.lock)" >> "$GITHUB_OUTPUT"
-
       - name: Checkout Play- at pinned SHA
         uses: actions/checkout@v4
         with:
@@ -49,42 +47,32 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           path: Play-
-
       - name: Fixture license check (LEG-02)
         run: bash ps2web/tools/check_fixture_licenses.sh
-
       - name: Apply PS2WEB frontend overlay
-        run: |
-          cp -rv ps2web/overlay/js/play_browser/src/. Play-/js/play_browser/src/
-
+        run: cp -rv ps2web/overlay/js/play_browser/src/. Play-/js/play_browser/src/
       - name: Setup Emscripten (pinned)
         uses: emscripten-core/setup-emsdk@v16
         with:
           version: 4.0.1
-
       - name: Install ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20.17
-
       - name: Configure (emcmake, preset wasm-ninja)
         working-directory: Play-
         run: emcmake cmake --preset wasm-ninja
-
       - name: Build (preset wasm-ninja-release)
         working-directory: Play-
         run: cmake --build --preset wasm-ninja-release
-
       - name: Verify Play.wasm artifact exists
         working-directory: Play-
         run: |
           BUILD_DIR=build_cmake/build/wasm-ninja/Source/ui_js/Release
           ls -la "$BUILD_DIR"
           test -f "$BUILD_DIR/Play.wasm"
-
       - name: Assemble Play Browser site
         working-directory: Play-
         run: |
@@ -96,39 +84,52 @@ jobs:
           export REACT_APP_VERSION="$(git -C "$GITHUB_WORKSPACE/Play-" describe --tags --always 2>/dev/null || echo dev)"
           npm install
           npm run build
-
       - name: Stage dist for ps2web
         run: |
           mkdir -p ps2web/dist
           cp -r Play-/js/play_browser/build/. ps2web/dist/
           cp "Play-/build_cmake/build/wasm-ninja/Source/ui_js/Release/Play.wasm" ps2web/dist/Play.wasm
           ls -la ps2web/dist | head
-
       - name: Upload Play.wasm
         uses: actions/upload-artifact@v4
         with:
           name: play-wasm
           path: Play-/build_cmake/build/wasm-ninja/Source/ui_js/Release/Play.wasm
-
       - name: Upload site
         uses: actions/upload-artifact@v4
         with:
           name: ps2web-site
           path: ps2web/dist
 
-      - name: Playwright smoke (COOP/COEP + valid wasm)
-        working-directory: ps2web
+  # --- F0 smoke: decoupled from build so a flaky smoke never skips the harness ---
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout ps2web
+        uses: actions/checkout@v4
+      - name: Download site
+        uses: actions/download-artifact@v4
+        with:
+          name: ps2web-site
+          path: dist
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.17
+      - name: Install + Playwright
         run: |
           npm install
           npx playwright install --with-deps chromium
-          npm run smoke
-
+      - name: F0 smoke (COOP/COEP + valid wasm)
+        run: npm run smoke
       - name: Upload smoke screenshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: f0-smoke-screenshot
-          path: ps2web/test-results
+          path: test-results
           if-no-files-found: ignore
 
   # --- F1 W3/W4: run the metrics harness on the built site + fixture ---
@@ -139,36 +140,30 @@ jobs:
     steps:
       - name: Checkout ps2web
         uses: actions/checkout@v4
-
       - name: Download site
         uses: actions/download-artifact@v4
         with:
           name: ps2web-site
           path: dist
-
       - name: Download fixtures
         uses: actions/download-artifact@v4
         with:
           name: fixtures
           path: dist/fixtures
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20.17
-
       - name: Install + Playwright
         run: |
           npm install
           npx playwright install --with-deps chromium
-
       - name: Run metrics harness (bench)
         env:
           BENCH_FIXTURE: cube
           BENCH_SECONDS: "20"
           BENCH_WARMUP: "6"
         run: npx playwright test -c tests/harness/playwright.harness.config.js
-
       - name: Upload bench results
         if: always()
         uses: actions/upload-artifact@v4

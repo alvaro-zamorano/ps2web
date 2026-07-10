@@ -22,3 +22,6 @@ Play! hace innecesario cualquier BIOS de Sony.
 
 ## Build
 Ver [BUILDING.md](./BUILDING.md).
+
+## Handoff / estado
+Ver [docs/HANDOFF.md](./docs/HANDOFF.md) — estado honesto del proyecto y direcciones para retomarlo.

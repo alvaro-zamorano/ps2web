@@ -57,6 +57,8 @@ test(`bench ${FIXTURE}`, async ({ page }) => {
     jitBlocks: samples.length ? (samples[samples.length - 1].jitBlocks || 0) : 0,
     blockDispatches: samples.length ? (samples[samples.length - 1].blockDispatches || 0) : 0,
     chainMapEntries: samples.length ? (samples[samples.length - 1].chainMapEntries || 0) : 0,
+    stateHash: samples.length ? (samples[samples.length - 1].stateHash || 0) : 0,
+    stateHashes: samples.map(s => s.stateHash),
     dispatchesPerSec: (samples.length > 1 && samples[samples.length-1].blockDispatches && samples[0].blockDispatches)
       ? Math.round((samples[samples.length-1].blockDispatches - samples[0].blockDispatches) / (samples.length - 1)) : 0,
     frameHash: stableHash,
@@ -76,7 +78,7 @@ test(`bench ${FIXTURE}`, async ({ page }) => {
     fs.writeFileSync(baselinePath, JSON.stringify(result, null, 2));
   }
 
-  console.log(`[bench] ${FIXTURE} avgFps=${result.avgFps} emu=${result.avgEmuSpeedPct}% p95ms=${result.p95MsPerFrame} threadsOk=${result.threadsOk} cores=${result.cores} jitMs=${result.jitCompileMs} jitBlocks=${result.jitBlocks} dispatch/s=${result.dispatchesPerSec} chainMap=${result.chainMapEntries} hashMatchesBaseline=${result.simdHashMatchesBaseline}`);
+  console.log(`[bench] ${FIXTURE} avgFps=${result.avgFps} emu=${result.avgEmuSpeedPct}% p95ms=${result.p95MsPerFrame} threadsOk=${result.threadsOk} cores=${result.cores} jitMs=${result.jitCompileMs} jitBlocks=${result.jitBlocks} dispatch/s=${result.dispatchesPerSec} chainMap=${result.chainMapEntries} stateHash=${result.stateHash} hashMatchesBaseline=${result.simdHashMatchesBaseline}`);
   expect(result.threadsOk, 'crossOriginIsolated + SharedArrayBuffer (threads) available').toBe(true);
   expect(result.avgFps, 'emulator produced frames').toBeGreaterThan(0);
 });

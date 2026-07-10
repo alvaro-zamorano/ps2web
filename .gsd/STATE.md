@@ -1,7 +1,7 @@
 # State
 
 ## Current Phase
-F3 W2.2a en vuelo (patch 03): mapa PC→tableIndex poblado en BasicBlock::Compile. Validado que GetCode()=índice de WebAssembly.Table (MemoryFunction.cpp: addFunction). SIN cambio de ejecución → frame-hash debe seguir idéntico; validación = chainMapEntries ≈ jitBlocks (~1000 en vu1). Es la base del dispatchLoop (W2.2b). Pusheado, validando en CI.
+F3 W2.2a verde + HALLAZGO: el frameHash de canvas NO es gate válido (blank-dominado + no-determinista; cube constante, vu1 varía 4 hashes/run). Bloquea validar W2.2b. Acción (patch 04, en CI): getStateHash() = hash determinista de EE RAM (estado CPU completo) como gate real. Primero valido su reproducibilidad. SIGUIENTE: si stateHash es estable → es el gate de W2.2b (dispatchLoop). Regla #1: sin gate fiable no se toca el chaining.
 
 ## Completed
 - 2026-07-09: `.gsd/` scaffolding desde §5 + master plan en docs/.

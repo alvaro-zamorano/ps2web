@@ -10,7 +10,7 @@ export function startMetrics(playModule: any) {
   (window as any).PlayModule = playModule;
   const threadsOk = (window.crossOriginIsolated === true) && (typeof SharedArrayBuffer !== 'undefined');
   const cores = (navigator as any).hardwareConcurrency || 0;
-  const metrics = { fps: 0, emuSpeedPct: 0, msPerFrame: 0, frameHash: null as number | null, threadsOk, cores, jitCompileMs: 0, jitBlocks: 0, blockDispatches: 0, chainMapEntries: 0, ts: Date.now() };
+  const metrics = { fps: 0, emuSpeedPct: 0, msPerFrame: 0, frameHash: null as number | null, threadsOk, cores, jitCompileMs: 0, jitBlocks: 0, blockDispatches: 0, chainMapEntries: 0, stateHash: 0, ts: Date.now() };
   (window as any).__ps2web_metrics = metrics;
 
   let last = performance.now();
@@ -23,6 +23,7 @@ export function startMetrics(playModule: any) {
     try { metrics.jitCompileMs = Math.round(playModule.getJitMs() * 100) / 100; metrics.jitBlocks = playModule.getJitBlocks(); } catch (e) {}
     try { metrics.blockDispatches = playModule.getDispatches(); } catch (e) {}
     try { metrics.chainMapEntries = playModule.getChainMapEntries(); } catch (e) {}
+    try { metrics.stateHash = playModule.getStateHash(); } catch (e) {}
     const fps = dt > 0 ? frames / dt : 0;
     metrics.fps = Math.round(fps * 100) / 100;
     metrics.emuSpeedPct = Math.round((fps / TARGET_FPS) * 1000) / 10;

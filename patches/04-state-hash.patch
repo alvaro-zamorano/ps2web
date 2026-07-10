@@ -1,0 +1,37 @@
+diff --git a/Source/ui_js/Main.cpp b/Source/ui_js/Main.cpp
+index 7c24f6e..104cbbb 100644
+--- a/Source/ui_js/Main.cpp
++++ b/Source/ui_js/Main.cpp
+@@ -10,6 +10,8 @@
+ #include "InputProviderEmscripten.h"
+ #include "ui_shared/StatsManager.h"
+ #include "DefaultAppConfig.h"
++#include "ee/Ee_SubSystem.h"
++#include "Ps2Const.h"
+ 
+ CPs2VmJs* g_virtualMachine = nullptr;
+ CGSHandler::NewFrameEvent::Connection g_gsNewFrameConnection;
+@@ -152,6 +154,17 @@ double getJitMs() { return g_ps2webJitNs.load() / 1e6; }
+ int getJitBlocks() { return static_cast<int>(g_ps2webJitBlocks.load()); }
+ double getDispatches() { return static_cast<double>(g_ps2webDispatches.load()); }
+ int getChainMapEntries() { std::lock_guard<std::mutex> _l(g_ps2webChainMapMtx); return static_cast<int>(g_ps2webChainMap.size()); }
++// PS2WEB(F3): deterministic emulation-state hash (EE base RAM, strided). Replaces the unreliable
++// canvas frameHash as the JIT correctness gate. Read-only; any CPU divergence changes it.
++double getStateHash() {
++	if(!g_virtualMachine) return 0;
++	auto& ee = g_virtualMachine->m_ee;
++	if(!ee || !ee->m_ram) return 0;
++	const uint8* ram = ee->m_ram;
++	uint32 h = 2166136261u;
++	for(uint32 i = 0; i < PS2::EE_BASE_RAM_SIZE; i += 16) { h ^= ram[i]; h *= 16777619u; }
++	return static_cast<double>(h);
++}
+ 
+ EMSCRIPTEN_BINDINGS(Play)
+ {
+@@ -165,4 +178,5 @@ EMSCRIPTEN_BINDINGS(Play)
+ 	function("getJitBlocks", &getJitBlocks);
+ 	function("getDispatches", &getDispatches);
+ 	function("getChainMapEntries", &getChainMapEntries);
++	function("getStateHash", &getStateHash);
+ }

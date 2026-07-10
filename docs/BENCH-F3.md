@@ -49,3 +49,8 @@ quedándose en wasm entre bloques.
 declarar speedup hay que superar ~±10%; el objetivo 2x (JIT-02) es detectable, mejoras <5%
 (p.ej. batching en micro-fixtures) NO lo son. Para medir F3 conviene promediar ≥3 runs o subir
 la duración del bench.
+
+## W2.2a (run 29082763588) + hallazgo crítico del gate de corrección
+- chainMapEntries: cube 1031 (jitBlocks 1034), vu1 1096 (1099). Diff=3 = recompilaciones (mapa por PC único). Mapa OK.
+- **frameHash NO es un gate válido:** cube=3820964002 constante (canvas en blanco: WebGL sin preserveDrawingBuffer); vu1 varía DENTRO del run (4 hashes distintos en 20 muestras) → capta contenido de forma no-determinista. No sirve para validar el JIT.
+- **Acción:** patch 04 añade getStateHash() = hash determinista de EE RAM (todo el estado de CPU). Cualquier divergencia del JIT lo cambia. Se valida su reproducibilidad antes de usarlo como gate de W2.2b.

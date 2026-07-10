@@ -1,7 +1,7 @@
 # State
 
 ## Current Phase
-F3 W2.2b.1 verde. Antes de W2.2b.2 (dispatch) aislé 2 requisitos de corrección (JIT-DESIGN §W2.2b.2): (1) tabla POR-EXECUTOR (el mapa global colisiona EE/IOP/VU), (2) invalidación en DeleteBlock/SMC (o entradas stale → despacho a bloque liberado). CAVEAT: cube probablemente no ejercita SMC → el gate podría dar falso verde; W2.2b.2 exige validación manual T2 además del golden. Orden revisado: W2.2b.2a (tabla per-executor + invalidación, sin fast-path) → 2b (fast-path C++) → 2c (dispatch residente wasm). SIGUIENTE: W2.2b.2a.
+F3 W2.2b.2a en vuelo (patch 07): mapa PC→índice POR-EXECUTOR (miembro de CGenericMipsExecutor, se puebla en CreateBlock tras Compile) + invalidación (DeleteBlock/Reset) + accesor CBasicBlock::GetWasmTableIndex. SIN fast-path → no cambia ejecución. Gate: cube.stateHashAtN golden intacto Y execMismatches==0 (insert/lookup self-consistentes). Todo #ifdef __EMSCRIPTEN__. Es la estructura correcta (sin colisión EE/IOP/VU) para el fast-path W2.2b.2b. Pusheado, validando en CI.
 
 ## Completed
 - 2026-07-09: `.gsd/` scaffolding desde §5 + master plan en docs/.

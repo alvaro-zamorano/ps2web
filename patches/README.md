@@ -30,3 +30,11 @@ nombres ya reflejan el historial deseado. Nada aquí se pierde.
 - 04-state-hash.patch — getStateHash() (hash determinista de EE base RAM). Reemplaza el frameHash de canvas (roto: dominado por lecturas en blanco + no-determinista) como gate de corrección del JIT. Read-only.
 - 05-frame-anchored-hash.patch — getStateHashAtN(): captura el hash de EE RAM EXACTAMENTE en el frame 180 (dentro del callback de frame), + getTotalFrames(). Sonda determinista: 2 runs del mismo commit deben dar el mismo valor si la emulación es determinista bajo threads.
 - 06-chaintable-linear.patch — W2.2b.1: mapa PC→índice en array plano de memoria lineal (hash abierto), indexable por wasm. Sin cambio de ejecución. getChainTableMismatches() debe ser 0 (coincide con el mapa de referencia). Prerrequisito del dispatchLoop.
+
+## Lección (2026-07-10): CRLF en patches
+Algunos ficheros de Play! usan CRLF (p.ej. Source/BasicBlock.h). Editar en modo texto con
+python convierte CRLF→LF y reescribe el fichero entero (diff gigante, patch frágil). Editar
+esos ficheros en modo BINARIO preservando `\r\n`. Verificar con `git diff --numstat` (líneas
+cambiadas deben ser pocas, no ~todo el fichero).
+
+- 07-per-executor-map.patch — W2.2b.2a: mapa PC→índice POR-EXECUTOR (miembro de CGenericMipsExecutor) + invalidación en DeleteBlock/Reset + accesor CBasicBlock::GetWasmTableIndex. SIN fast-path (no cambia ejecución). Gate: cube golden intacto + execMismatches==0. Todo #ifdef __EMSCRIPTEN__.

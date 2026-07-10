@@ -1,0 +1,155 @@
+diff --git a/Source/BasicBlock.cpp b/Source/BasicBlock.cpp
+index 3a0bab6..177462f 100644
+--- a/Source/BasicBlock.cpp
++++ b/Source/BasicBlock.cpp
+@@ -10,6 +10,7 @@
+ std::atomic<uint64_t> g_ps2webJitNs{0};
+ std::atomic<uint32_t> g_ps2webJitBlocks{0};
+ std::atomic<uint64_t> g_ps2webDispatches{0};
++std::atomic<uint32_t> g_ps2webExecMismatches{0}; // PS2WEB(F3 W2.2b.2a)
+ // PS2WEB(F3 W2.2a): PC->wasm table-index map (foundation for chaining; NOT used for execution yet).
+ #include <unordered_map>
+ #include <mutex>
+@@ -387,6 +388,15 @@ uint32 CBasicBlock::GetBeginAddress() const
+ 	return m_begin;
+ }
+ 
++uint32 CBasicBlock::GetWasmTableIndex() const
++{
++#if defined(__EMSCRIPTEN__) && !defined(AOT_USE_CACHE)
++	return static_cast<uint32>(reinterpret_cast<uintptr_t>(m_function.GetCode()));
++#else
++	return 0;
++#endif
++}
++
+ uint32 CBasicBlock::GetEndAddress() const
+ {
+ 	return m_end;
+diff --git a/Source/BasicBlock.h b/Source/BasicBlock.h
+index 56ef0ad..08eed3d 100644
+--- a/Source/BasicBlock.h
++++ b/Source/BasicBlock.h
+@@ -80,6 +80,7 @@ public:
+ 
+ 	uint32 GetBeginAddress() const;
+ 	uint32 GetEndAddress() const;
++	uint32 GetWasmTableIndex() const; // PS2WEB(F3)
+ 	bool IsCompiled() const;
+ 	bool IsEmpty() const;
+ 
+diff --git a/Source/GenericMipsExecutor.h b/Source/GenericMipsExecutor.h
+index 4ebb04c..b0bd75a 100644
+--- a/Source/GenericMipsExecutor.h
++++ b/Source/GenericMipsExecutor.h
+@@ -7,6 +7,10 @@
+ #include "BlockLookupOneWay.h"
+ #include "BlockLookupTwoWay.h"
+ #include <atomic>
++#ifdef __EMSCRIPTEN__
++#include <vector>
++extern std::atomic<uint32_t> g_ps2webExecMismatches; // PS2WEB(F3 W2.2b.2a)
++#endif
+ extern std::atomic<uint64_t> g_ps2webDispatches; // PS2WEB(F3): block dispatch counter
+ 
+ FRAMEWORK_MAYBE_UNUSED
+@@ -92,6 +96,9 @@ public:
+ 	void Reset() override
+ 	{
+ 		m_blockLookup.Clear();
++#ifdef __EMSCRIPTEN__
++		ps2webExecClear();
++#endif
+ 		m_blocks.clear();
+ 		m_blockOutLinks.clear();
+ #ifdef DEBUGGER_INCLUDED
+@@ -142,9 +149,41 @@ protected:
+ 		auto block = BlockFactory(m_context, start, end);
+ 		ResetBlockOutLinks(block.get());
+ 		m_blockLookup.AddBlock(block.get());
++#ifdef __EMSCRIPTEN__
++		ps2webExecInsert(block->GetBeginAddress(), block->GetWasmTableIndex()); // PS2WEB(F3 W2.2b.2a)
++#endif
+ 		m_blocks.insert(std::move(block));
+ 	}
+ 
++#ifdef __EMSCRIPTEN__
++	// PS2WEB(F3 W2.2b.2a): per-executor flat PC->tableIndex map (no cross-executor collision).
++	static const uint32 PS2WEB_EXECMAP_BITS = 18;
++	static const uint32 PS2WEB_EXECMAP_SIZE = 1u << PS2WEB_EXECMAP_BITS;
++	static const uint32 PS2WEB_EXECMAP_MASK = PS2WEB_EXECMAP_SIZE - 1;
++	static uint32 ps2webExecHash(uint32 pc) { return (pc * 2654435761u) >> (32 - PS2WEB_EXECMAP_BITS); }
++	void ps2webExecEnsure() { if(m_ps2webKey.empty()) { m_ps2webKey.assign(PS2WEB_EXECMAP_SIZE, 0); m_ps2webVal.assign(PS2WEB_EXECMAP_SIZE, 0); } }
++	void ps2webExecClear() { m_ps2webKey.clear(); m_ps2webVal.clear(); }
++	uint32 ps2webExecLookup(uint32 pc) {
++		if(m_ps2webKey.empty()) return 0;
++		uint32 k = pc + 1, h = ps2webExecHash(pc);
++		while(m_ps2webKey[h] != 0) { if(m_ps2webKey[h] == k) return m_ps2webVal[h]; h = (h + 1) & PS2WEB_EXECMAP_MASK; }
++		return 0;
++	}
++	void ps2webExecInsert(uint32 pc, uint32 idx) {
++		if(pc == MIPS_INVALID_PC) return;
++		ps2webExecEnsure();
++		uint32 k = pc + 1, h = ps2webExecHash(pc);
++		while(m_ps2webKey[h] != 0 && m_ps2webKey[h] != k) h = (h + 1) & PS2WEB_EXECMAP_MASK;
++		m_ps2webKey[h] = k; m_ps2webVal[h] = idx;
++		if(ps2webExecLookup(pc) != idx) g_ps2webExecMismatches.fetch_add(1, std::memory_order_relaxed);
++	}
++	void ps2webExecErase(uint32 pc) {
++		if(m_ps2webKey.empty()) return;
++		uint32 k = pc + 1, h = ps2webExecHash(pc);
++		while(m_ps2webKey[h] != 0) { if(m_ps2webKey[h] == k) { m_ps2webVal[h] = 0; return; } h = (h + 1) & PS2WEB_EXECMAP_MASK; }
++	}
++#endif
++
+ 	void ResetBlockOutLinks(CBasicBlock* block)
+ 	{
+ 		for(uint32 i = 0; i < LINK_SLOT_MAX; i++)
+@@ -290,6 +329,9 @@ protected:
+ 			if(!RangesOverlap(block->GetBeginAddress(), block->GetEndAddress(), start, end)) continue;
+ 			clearedBlocks.insert(block);
+ 			m_blockLookup.DeleteBlock(block);
++#ifdef __EMSCRIPTEN__
++			ps2webExecErase(block->GetBeginAddress());
++#endif
+ 		}
+ 
+ 		//Remove pending block link entries for the blocks that are about to be cleared
+@@ -329,6 +371,10 @@ protected:
+ 	BLOCK_CATEGORY m_blockCategory = BLOCK_CATEGORY_UNKNOWN;
+ 
+ 	BlockLookupType m_blockLookup;
++#ifdef __EMSCRIPTEN__
++	std::vector<uint32> m_ps2webKey;
++	std::vector<uint32> m_ps2webVal;
++#endif
+ 
+ #ifdef DEBUGGER_INCLUDED
+ 	bool m_mustBreak = false;
+diff --git a/Source/ui_js/Main.cpp b/Source/ui_js/Main.cpp
+index ce53fc1..6ba171e 100644
+--- a/Source/ui_js/Main.cpp
++++ b/Source/ui_js/Main.cpp
+@@ -157,12 +157,14 @@ void clearStats()
+ extern std::atomic<uint64_t> g_ps2webJitNs;
+ extern std::atomic<uint32_t> g_ps2webJitBlocks;
+ extern std::atomic<uint64_t> g_ps2webDispatches;
++extern std::atomic<uint32_t> g_ps2webExecMismatches;
+ extern std::unordered_map<uint32, uint32> g_ps2webChainMap;
+ extern std::mutex g_ps2webChainMapMtx;
+ uint32 ps2webChainLookup(uint32);
+ double getJitMs() { return g_ps2webJitNs.load() / 1e6; }
+ int getJitBlocks() { return static_cast<int>(g_ps2webJitBlocks.load()); }
+ double getDispatches() { return static_cast<double>(g_ps2webDispatches.load()); }
++int getExecMismatches() { return static_cast<int>(g_ps2webExecMismatches.load()); }
+ int getChainMapEntries() { std::lock_guard<std::mutex> _l(g_ps2webChainMapMtx); return static_cast<int>(g_ps2webChainMap.size()); }
+ int getChainTableMismatches() { std::lock_guard<std::mutex> _l(g_ps2webChainMapMtx); int bad=0; for(auto& kv : g_ps2webChainMap) if(ps2webChainLookup(kv.first) != kv.second) ++bad; return bad; }
+ // PS2WEB(F3): deterministic emulation-state hash (EE base RAM, strided). Replaces the unreliable
+@@ -190,6 +192,7 @@ EMSCRIPTEN_BINDINGS(Play)
+ 	function("getJitMs", &getJitMs);
+ 	function("getJitBlocks", &getJitBlocks);
+ 	function("getDispatches", &getDispatches);
++	function("getExecMismatches", &getExecMismatches);
+ 	function("getChainMapEntries", &getChainMapEntries);
+ 	function("getChainTableMismatches", &getChainTableMismatches);
+ 	function("getStateHash", &getStateHash);

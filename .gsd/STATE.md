@@ -1,7 +1,7 @@
 # State
 
 ## Current Phase
-F3 W2 en marcha. Primer patch: patches/01-jit-instrumentation.patch — instrumenta el coste del JIT (getJitMs/getJitBlocks exportados; atómicos en BasicBlock::Compile alrededor de CMemoryFunction). Overlay+harness reportan jitCompileMs/jitBlocks (cube+vu1). Sirve para cuantificar el coste del WebAssembly.Module-por-bloque antes del batching. Fork bloqueado → modelo patches/.
+F3 W2.1 ✅ + ANALIZADO (docs/BENCH-F3.md): cube 56.2fps/1034blk/131ms, vu1 48.5fps/80.9%/1099blk/152ms. Hallazgo: JIT-compile NO domina steady-state (~0.13ms/blk, casi todo en warmup) → **reordenado: Palanca 2 (chaining por WebAssembly.Table) primero** (ahí vive el ≥2x, el coste es el round-trip de dispatch por bloque). vu1 (80.9%) = fixture de speedup. SIGUIENTE (W2.2): implementar chaining — toca CCodeGen_Wasm + submódulo, vía patches/codegen/. Grande y correctness-crítico.
 
 ## Completed
 - 2026-07-09: `.gsd/` scaffolding desde §5 + master plan en docs/.
@@ -22,6 +22,8 @@ F3 W2 en marcha. Primer patch: patches/01-jit-instrumentation.patch — instrume
 
 - 2026-07-09: F3 W1 — JIT-DESIGN.md. Palancas en orden: (1) batching de compilación (MemoryFunction/BasicBlock), (2) chaining sin SMC vía WebAssembly.Table (bucle dispatch residente en wasm 2a + sucesor directo 2b; toca CCodeGen_Wasm), (3) SIMD hot paths. Corrección-primero (frame-hash). Speedup ref = vu1 sobre F2. Implementación necesita fork de Play!.
 - 2026-07-09: F3-prep — fixture vu1 (ps2sdk AFL, VU1+texturas, sin VCL) añadido y compilando en CI. Da margen medible que el cubo (cap 60fps) no tiene.
+
+- 2026-07-09: F3 W2.1 — instrumentación JIT (patch 01) verde. Datos reordenan F3: Palanca 2 (chaining) primero (el JIT-compile es minoritario en steady-state; el dispatch por bloque domina). Ver docs/BENCH-F3.md.
 
 ## Decisions Log
 - 2026-07-08: D1..D12 bloqueadas (docs/PS2WEB-MASTER-PLAN.md §1).

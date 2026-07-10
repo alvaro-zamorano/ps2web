@@ -99,3 +99,14 @@ sub-hito y commits limpios rebasables (D10). El diseño (W1, este doc) no lo nec
 **F3 = Rama A, tres palancas, en el orden 1→2→3, corrección-primero.** La implementación (W2+)
 arranca tras: (i) OK humano a este diseño, (ii) fork de Play! creado. La referencia de speedup
 es `vu1` sobre el build F2.
+
+---
+## Actualización basada en datos (W2.1, run 29076688849) — reordenación
+La instrumentación (ver `docs/BENCH-F3.md`) muestra que el **JIT-compile no domina el estado
+estacionario** (~0.13 ms/bloque, ~130-150 ms/run, casi todo en warmup) y que **vu1 corre a
+80.9%** de realtime. Por tanto:
+- **Se prioriza la Palanca 2 (chaining por WebAssembly.Table)** — es donde vive el ≥2x, porque
+  el coste dominante es el round-trip de dispatch por bloque, no la compilación.
+- La Palanca 1 (batching) se mantiene pero con expectativa honesta: win de arranque y de juegos
+  reales (decenas de miles de bloques), no de estos micro-fixtures. Menor prioridad de fps.
+- Orden efectivo: **W2.2 = Palanca 2 sobre vu1** → W2.3 batching → W2.4 SIMD hot paths.

@@ -3,13 +3,15 @@
   "rig": "ci-headless-swiftshader",
   "seconds": 20,
   "warmup": 6,
-  "avgFps": 57.6,
-  "minFps": 56.99,
-  "maxFps": 58.01,
-  "avgEmuSpeedPct": 96.1,
-  "p95MsPerFrame": 17.55,
+  "avgFps": 56.2,
+  "minFps": 55.92,
+  "maxFps": 57.05,
+  "avgEmuSpeedPct": 93.8,
+  "p95MsPerFrame": 17.88,
   "threadsOk": true,
   "cores": 4,
+  "jitCompileMs": 131.01,
+  "jitBlocks": 1034,
   "frameHash": 3820964002,
   "baselineFrameHash": 3820964002,
   "simdHashMatchesBaseline": true,
@@ -22,7 +24,7 @@
     3820964002,
     3820964002,
     3820964002,
-    1877863668,
+    3820964002,
     3820964002,
     3820964002,
     3820964002,
@@ -38,22 +40,15 @@
   ],
   "samples": [
     {
-      "fps": 58,
-      "emuSpeedPct": 96.8,
-      "msPerFrame": 17.24,
+      "fps": 56,
+      "emuSpeedPct": 93.4,
+      "msPerFrame": 17.86,
       "frameHash": 3820964002,
       "threadsOk": true,
       "cores": 4,
-      "ts": 1783638846127
-    },
-    {
-      "fps": 58,
-      "emuSpeedPct": 96.8,
-      "msPerFrame": 17.24,
-      "frameHash": 3820964002,
-      "threadsOk": true,
-      "cores": 4,
-      "ts": 1783638847125
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668759328
     },
     {
       "fps": 57,
@@ -62,162 +57,209 @@
       "frameHash": 3820964002,
       "threadsOk": true,
       "cores": 4,
-      "ts": 1783638848126
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668760334
     },
     {
-      "fps": 58,
-      "emuSpeedPct": 96.8,
-      "msPerFrame": 17.24,
+      "fps": 55.92,
+      "emuSpeedPct": 93.3,
+      "msPerFrame": 17.88,
       "frameHash": 3820964002,
       "threadsOk": true,
       "cores": 4,
-      "ts": 1783638849128
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668761331
     },
     {
       "fps": 57,
-      "emuSpeedPct": 95.1,
-      "msPerFrame": 17.54,
-      "frameHash": 3820964002,
-      "threadsOk": true,
-      "cores": 4,
-      "ts": 1783638850126
-    },
-    {
-      "fps": 58,
-      "emuSpeedPct": 96.8,
-      "msPerFrame": 17.24,
-      "frameHash": 3820964002,
-      "threadsOk": true,
-      "cores": 4,
-      "ts": 1783638851129
-    },
-    {
-      "fps": 58,
-      "emuSpeedPct": 96.8,
-      "msPerFrame": 17.24,
-      "frameHash": 3820964002,
-      "threadsOk": true,
-      "cores": 4,
-      "ts": 1783638852126
-    },
-    {
-      "fps": 58,
-      "emuSpeedPct": 96.8,
-      "msPerFrame": 17.24,
-      "frameHash": 1877863668,
-      "threadsOk": true,
-      "cores": 4,
-      "ts": 1783638853130
-    },
-    {
-      "fps": 58,
-      "emuSpeedPct": 96.8,
-      "msPerFrame": 17.24,
-      "frameHash": 3820964002,
-      "threadsOk": true,
-      "cores": 4,
-      "ts": 1783638854125
-    },
-    {
-      "fps": 56.99,
       "emuSpeedPct": 95.1,
       "msPerFrame": 17.55,
       "frameHash": 3820964002,
       "threadsOk": true,
       "cores": 4,
-      "ts": 1783638855128
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668762333
     },
     {
-      "fps": 58.01,
-      "emuSpeedPct": 96.8,
-      "msPerFrame": 17.24,
-      "frameHash": 3820964002,
-      "threadsOk": true,
-      "cores": 4,
-      "ts": 1783638856128
-    },
-    {
-      "fps": 57,
+      "fps": 57.03,
       "emuSpeedPct": 95.1,
-      "msPerFrame": 17.54,
+      "msPerFrame": 17.53,
       "frameHash": 3820964002,
       "threadsOk": true,
       "cores": 4,
-      "ts": 1783638857125
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668763331
     },
     {
-      "fps": 58,
-      "emuSpeedPct": 96.8,
-      "msPerFrame": 17.24,
+      "fps": 56.06,
+      "emuSpeedPct": 93.5,
+      "msPerFrame": 17.84,
       "frameHash": 3820964002,
       "threadsOk": true,
       "cores": 4,
-      "ts": 1783638858130
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668764326
     },
     {
-      "fps": 57,
-      "emuSpeedPct": 95.1,
-      "msPerFrame": 17.54,
+      "fps": 56,
+      "emuSpeedPct": 93.4,
+      "msPerFrame": 17.86,
       "frameHash": 3820964002,
       "threadsOk": true,
       "cores": 4,
-      "ts": 1783638859125
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668765330
     },
     {
-      "fps": 57,
-      "emuSpeedPct": 95.1,
-      "msPerFrame": 17.54,
+      "fps": 55.96,
+      "emuSpeedPct": 93.4,
+      "msPerFrame": 17.87,
       "frameHash": 3820964002,
       "threadsOk": true,
       "cores": 4,
-      "ts": 1783638860126
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668766331
     },
     {
-      "fps": 58,
-      "emuSpeedPct": 96.8,
-      "msPerFrame": 17.24,
+      "fps": 57.05,
+      "emuSpeedPct": 95.2,
+      "msPerFrame": 17.53,
       "frameHash": 3820964002,
       "threadsOk": true,
       "cores": 4,
-      "ts": 1783638861125
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668767332
     },
     {
-      "fps": 57,
-      "emuSpeedPct": 95.1,
-      "msPerFrame": 17.54,
+      "fps": 56,
+      "emuSpeedPct": 93.4,
+      "msPerFrame": 17.86,
       "frameHash": 3820964002,
       "threadsOk": true,
       "cores": 4,
-      "ts": 1783638862125
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668768326
     },
     {
-      "fps": 58,
-      "emuSpeedPct": 96.8,
-      "msPerFrame": 17.24,
+      "fps": 55.97,
+      "emuSpeedPct": 93.4,
+      "msPerFrame": 17.87,
       "frameHash": 3820964002,
       "threadsOk": true,
       "cores": 4,
-      "ts": 1783638863127
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668769331
     },
     {
-      "fps": 57,
-      "emuSpeedPct": 95.1,
-      "msPerFrame": 17.54,
+      "fps": 56,
+      "emuSpeedPct": 93.4,
+      "msPerFrame": 17.86,
       "frameHash": 3820964002,
       "threadsOk": true,
       "cores": 4,
-      "ts": 1783638864125
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668770332
     },
     {
-      "fps": 57.99,
-      "emuSpeedPct": 96.7,
-      "msPerFrame": 17.24,
+      "fps": 56.03,
+      "emuSpeedPct": 93.5,
+      "msPerFrame": 17.85,
       "frameHash": 3820964002,
       "threadsOk": true,
       "cores": 4,
-      "ts": 1783638865130
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668771327
+    },
+    {
+      "fps": 56,
+      "emuSpeedPct": 93.4,
+      "msPerFrame": 17.86,
+      "frameHash": 3820964002,
+      "threadsOk": true,
+      "cores": 4,
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668772331
+    },
+    {
+      "fps": 56,
+      "emuSpeedPct": 93.4,
+      "msPerFrame": 17.86,
+      "frameHash": 3820964002,
+      "threadsOk": true,
+      "cores": 4,
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668773326
+    },
+    {
+      "fps": 56,
+      "emuSpeedPct": 93.4,
+      "msPerFrame": 17.86,
+      "frameHash": 3820964002,
+      "threadsOk": true,
+      "cores": 4,
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668774326
+    },
+    {
+      "fps": 56,
+      "emuSpeedPct": 93.4,
+      "msPerFrame": 17.86,
+      "frameHash": 3820964002,
+      "threadsOk": true,
+      "cores": 4,
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668775331
+    },
+    {
+      "fps": 56,
+      "emuSpeedPct": 93.4,
+      "msPerFrame": 17.86,
+      "frameHash": 3820964002,
+      "threadsOk": true,
+      "cores": 4,
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668776326
+    },
+    {
+      "fps": 56,
+      "emuSpeedPct": 93.4,
+      "msPerFrame": 17.86,
+      "frameHash": 3820964002,
+      "threadsOk": true,
+      "cores": 4,
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668777332
+    },
+    {
+      "fps": 56,
+      "emuSpeedPct": 93.4,
+      "msPerFrame": 17.86,
+      "frameHash": 3820964002,
+      "threadsOk": true,
+      "cores": 4,
+      "jitCompileMs": 131.01,
+      "jitBlocks": 1034,
+      "ts": 1783668778330
     }
   ],
   "upstream": "b72057621e55608e0b10f14ee9e54d56fd6cc99c",
-  "generatedAt": "2026-07-09T23:14:25.282Z"
+  "generatedAt": "2026-07-10T07:32:58.473Z"
 }

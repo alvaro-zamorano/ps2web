@@ -1,0 +1,61 @@
+diff --git a/Source/BasicBlock.cpp b/Source/BasicBlock.cpp
+index 30700c1..3a0bab6 100644
+--- a/Source/BasicBlock.cpp
++++ b/Source/BasicBlock.cpp
+@@ -15,6 +15,23 @@ std::atomic<uint64_t> g_ps2webDispatches{0};
+ #include <mutex>
+ std::unordered_map<uint32, uint32> g_ps2webChainMap;
+ std::mutex g_ps2webChainMapMtx;
++// PS2WEB(F3 W2.2b.1): flat PC->tableIndex open-addressed hash in LINEAR MEMORY (indexable by hand-emitted wasm).
++static const uint32 PS2WEB_CHAIN_BITS = 18;
++static const uint32 PS2WEB_CHAIN_SIZE = 1u << PS2WEB_CHAIN_BITS;
++static const uint32 PS2WEB_CHAIN_MASK = PS2WEB_CHAIN_SIZE - 1;
++uint32 g_ps2webChainKey[PS2WEB_CHAIN_SIZE] = {0}; // stored key = pc+1 (0 = empty slot)
++uint32 g_ps2webChainVal[PS2WEB_CHAIN_SIZE] = {0};
++static inline uint32 ps2webChainHash(uint32 pc) { return (pc * 2654435761u) >> (32 - PS2WEB_CHAIN_BITS); }
++void ps2webChainInsert(uint32 pc, uint32 tableIndex) {
++	uint32 k = pc + 1, h = ps2webChainHash(pc);
++	while(g_ps2webChainKey[h] != 0 && g_ps2webChainKey[h] != k) h = (h + 1) & PS2WEB_CHAIN_MASK;
++	g_ps2webChainKey[h] = k; g_ps2webChainVal[h] = tableIndex;
++}
++uint32 ps2webChainLookup(uint32 pc) {
++	uint32 k = pc + 1, h = ps2webChainHash(pc);
++	while(g_ps2webChainKey[h] != 0) { if(g_ps2webChainKey[h] == k) return g_ps2webChainVal[h]; h = (h + 1) & PS2WEB_CHAIN_MASK; }
++	return 0;
++}
+ 
+ #if defined(AOT_BUILD_CACHE) || defined(AOT_USE_CACHE)
+ #define AOT_ENABLED
+@@ -118,6 +135,7 @@ void CBasicBlock::Compile()
+ 		uint32 tableIndex = static_cast<uint32>(reinterpret_cast<uintptr_t>(m_function.GetCode()));
+ 		std::lock_guard<std::mutex> _l(g_ps2webChainMapMtx);
+ 		g_ps2webChainMap[m_begin] = tableIndex; // PS2WEB(F3 W2.2a)
++		ps2webChainInsert(m_begin, tableIndex); // PS2WEB(F3 W2.2b.1)
+ 	}
+ 
+ #ifdef VTUNE_ENABLED
+diff --git a/Source/ui_js/Main.cpp b/Source/ui_js/Main.cpp
+index a6129f2..ce53fc1 100644
+--- a/Source/ui_js/Main.cpp
++++ b/Source/ui_js/Main.cpp
+@@ -159,10 +159,12 @@ extern std::atomic<uint32_t> g_ps2webJitBlocks;
+ extern std::atomic<uint64_t> g_ps2webDispatches;
+ extern std::unordered_map<uint32, uint32> g_ps2webChainMap;
+ extern std::mutex g_ps2webChainMapMtx;
++uint32 ps2webChainLookup(uint32);
+ double getJitMs() { return g_ps2webJitNs.load() / 1e6; }
+ int getJitBlocks() { return static_cast<int>(g_ps2webJitBlocks.load()); }
+ double getDispatches() { return static_cast<double>(g_ps2webDispatches.load()); }
+ int getChainMapEntries() { std::lock_guard<std::mutex> _l(g_ps2webChainMapMtx); return static_cast<int>(g_ps2webChainMap.size()); }
++int getChainTableMismatches() { std::lock_guard<std::mutex> _l(g_ps2webChainMapMtx); int bad=0; for(auto& kv : g_ps2webChainMap) if(ps2webChainLookup(kv.first) != kv.second) ++bad; return bad; }
+ // PS2WEB(F3): deterministic emulation-state hash (EE base RAM, strided). Replaces the unreliable
+ // canvas frameHash as the JIT correctness gate. Read-only; any CPU divergence changes it.
+ int getTotalFrames() { return static_cast<int>(g_ps2webTotalFrames.load()); }
+@@ -189,6 +191,7 @@ EMSCRIPTEN_BINDINGS(Play)
+ 	function("getJitBlocks", &getJitBlocks);
+ 	function("getDispatches", &getDispatches);
+ 	function("getChainMapEntries", &getChainMapEntries);
++	function("getChainTableMismatches", &getChainTableMismatches);
+ 	function("getStateHash", &getStateHash);
+ 	function("getTotalFrames", &getTotalFrames);
+ 	function("getStateHashAtN", &getStateHashAtN);

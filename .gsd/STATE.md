@@ -1,7 +1,7 @@
 # State
 
 ## Current Phase
-F3: GATE DE CORRECCIÓN RESUELTO. 2 runs del mismo commit (c826599): cube.stateHashAtN IGUAL (3049433245)=determinista; vu1 DIFIERE (async VU1). Política: corrección=cube.stateHashAtN (golden + aserción dura en harness); speedup=vu1 fps mediana. Ahora W2.2b (dispatchLoop residente wasm) tiene red real: si corrompe el cómputo, cube falla automáticamente. SIGUIENTE: implementar W2.2b (chaining vía WebAssembly.Table) — el paso que mueve el fps.
+F3 W2.2b.1 en vuelo (patch 06): mapa PC→índice en array plano de memoria lineal (hash abierto, indexable por wasm). Sin cambio de ejecución → gate: cube.stateHashAtN==golden(3049433245) Y chainTableMismatches==0 (la tabla plana coincide con el mapa de referencia). Es el prerrequisito del dispatchLoop (W2.2b.2). Pusheado, validando en CI.
 
 ## Completed
 - 2026-07-09: `.gsd/` scaffolding desde §5 + master plan en docs/.

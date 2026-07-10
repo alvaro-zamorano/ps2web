@@ -1,7 +1,7 @@
 # State
 
 ## Current Phase
-F8 (ship) infra lista: deploy/vercel.json (COOP/COEP en /*) + job `deploy` en CI que publica el dist/ prebuilt a Vercel con `vercel deploy` (gated en secret VERCEL_TOKEN; se salta limpio si no está). BLOQUEO EXTERNO: falta el token de Vercel. Vía inline del MCP descartada (no puedo emitir el wasm de 2.2MB base64). F5 W1 (OPFS) verde. SIGUIENTE: usuario añade VERCEL_TOKEN (repo Settings>Secrets) o me lo pasa; entonces el push a main despliega y verifico crossOriginIsolated en prod.
+FIX de producción: un juego comercial renderizaba intro+MENÚ y moría con 'out of memory' (worker) + 'failed to allocate executable memory for module'. Diagnóstico: NO es compatibilidad (el juego corre) — es la memoria fija de F2/D5 (1GB sin growth), validada solo con homebrew diminuto. **D5 REVISADO (regla #4, evidencia>plan):** se restaura -sALLOW_MEMORY_GROWTH + -sMAXIMUM_MEMORY=2GB, manteniendo pool 8 y SIMD. Pusheado → rebuild + redeploy automático a https://dist-ivory-phi-37.vercel.app. Nota: el warning 'executable memory for module' es code-space por el modelo 1-módulo-por-bloque (lo mitigaría el batching de F3, diferido); el growth arregla el OOM de memoria lineal.
 
 ## Completed
 - 2026-07-09: `.gsd/` scaffolding desde §5 + master plan en docs/.
@@ -27,6 +27,7 @@ F8 (ship) infra lista: deploy/vercel.json (COOP/COEP en /*) + job `deploy` en CI
 
 - 2026-07-10: F3 gate de corrección = cube.stateHashAtN (determinista, golden 3049433245, aserción dura en harness). vu1 no-determinista (VU1 async en worker) → solo gate de speedup (fps). Evidencia: 2 runs de c826599.
 
+- 2026-07-10: **D5 REVISADO** — memoria fija 1GB (F2) causaba OOM en juegos comerciales (renderizan intro+menú y mueren). Restaurado ALLOW_MEMORY_GROWTH + MAXIMUM_MEMORY=2GB. Evidencia > plan (regla #4). tools/apply_f2_flags.sh actualizado.
 - 2026-07-10: F3 — MEDIDO que las optimizaciones C++ del dispatch (fast-path por tabla, saltar FindBlockAt) NO aportan fps (vu1 −2.9%). El cuello es la frontera C++↔wasm. El ≥2x exige el bucle residente en wasm (2c). Ver docs/BENCH-F3.md.
 
 ## Decisions Log

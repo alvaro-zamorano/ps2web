@@ -1,0 +1,77 @@
+diff --git a/Source/BasicBlock.cpp b/Source/BasicBlock.cpp
+index 177462f..22af34a 100644
+--- a/Source/BasicBlock.cpp
++++ b/Source/BasicBlock.cpp
+@@ -11,6 +11,7 @@ std::atomic<uint64_t> g_ps2webJitNs{0};
+ std::atomic<uint32_t> g_ps2webJitBlocks{0};
+ std::atomic<uint64_t> g_ps2webDispatches{0};
+ std::atomic<uint32_t> g_ps2webExecMismatches{0}; // PS2WEB(F3 W2.2b.2a)
++std::atomic<uint32_t> g_ps2webFastMismatches{0}; // PS2WEB(F3 W2.2b.2b)
+ // PS2WEB(F3 W2.2a): PC->wasm table-index map (foundation for chaining; NOT used for execution yet).
+ #include <unordered_map>
+ #include <mutex>
+diff --git a/Source/GenericMipsExecutor.h b/Source/GenericMipsExecutor.h
+index b0bd75a..be7ba46 100644
+--- a/Source/GenericMipsExecutor.h
++++ b/Source/GenericMipsExecutor.h
+@@ -10,6 +10,7 @@
+ #ifdef __EMSCRIPTEN__
+ #include <vector>
+ extern std::atomic<uint32_t> g_ps2webExecMismatches; // PS2WEB(F3 W2.2b.2a)
++extern std::atomic<uint32_t> g_ps2webFastMismatches; // PS2WEB(F3 W2.2b.2b)
+ #endif
+ extern std::atomic<uint64_t> g_ps2webDispatches; // PS2WEB(F3): block dispatch counter
+ 
+@@ -72,6 +73,24 @@ public:
+ 		while(m_context.m_State.nHasException == 0)
+ 		{
+ 			uint32 address = m_context.m_State.nPC & m_addressMask;
++#ifdef __EMSCRIPTEN__
++			// PS2WEB(F3 W2.2b.2b): fast-path — dispatch via the per-executor flat map, skipping
++			// FindBlockAt + the virtual CBasicBlock::Execute. Periodic audit vs FindBlockAt catches
++			// stale entries (block recycling/invalidation). cube golden gates EE correctness.
++			uint32 ps2webIdx = ps2webExecLookup(address);
++			if(ps2webIdx != 0)
++			{
++				if((g_ps2webDispatches.load(std::memory_order_relaxed) & 0x3FF) == 0)
++				{
++					auto auditBlock = m_blockLookup.FindBlockAt(address);
++					if(!auditBlock->IsEmpty() && auditBlock->GetWasmTableIndex() != ps2webIdx)
++						g_ps2webFastMismatches.fetch_add(1, std::memory_order_relaxed);
++				}
++				reinterpret_cast<void(*)(void*)>(static_cast<uintptr_t>(ps2webIdx))(&m_context);
++				g_ps2webDispatches.fetch_add(1, std::memory_order_relaxed);
++				continue;
++			}
++#endif
+ 			auto block = m_blockLookup.FindBlockAt(address);
+ 			block->Execute();
+ 			g_ps2webDispatches.fetch_add(1, std::memory_order_relaxed); // PS2WEB(F3)
+diff --git a/Source/ui_js/Main.cpp b/Source/ui_js/Main.cpp
+index 6ba171e..c84c332 100644
+--- a/Source/ui_js/Main.cpp
++++ b/Source/ui_js/Main.cpp
+@@ -158,6 +158,7 @@ extern std::atomic<uint64_t> g_ps2webJitNs;
+ extern std::atomic<uint32_t> g_ps2webJitBlocks;
+ extern std::atomic<uint64_t> g_ps2webDispatches;
+ extern std::atomic<uint32_t> g_ps2webExecMismatches;
++extern std::atomic<uint32_t> g_ps2webFastMismatches;
+ extern std::unordered_map<uint32, uint32> g_ps2webChainMap;
+ extern std::mutex g_ps2webChainMapMtx;
+ uint32 ps2webChainLookup(uint32);
+@@ -165,6 +166,7 @@ double getJitMs() { return g_ps2webJitNs.load() / 1e6; }
+ int getJitBlocks() { return static_cast<int>(g_ps2webJitBlocks.load()); }
+ double getDispatches() { return static_cast<double>(g_ps2webDispatches.load()); }
+ int getExecMismatches() { return static_cast<int>(g_ps2webExecMismatches.load()); }
++int getFastMismatches() { return static_cast<int>(g_ps2webFastMismatches.load()); }
+ int getChainMapEntries() { std::lock_guard<std::mutex> _l(g_ps2webChainMapMtx); return static_cast<int>(g_ps2webChainMap.size()); }
+ int getChainTableMismatches() { std::lock_guard<std::mutex> _l(g_ps2webChainMapMtx); int bad=0; for(auto& kv : g_ps2webChainMap) if(ps2webChainLookup(kv.first) != kv.second) ++bad; return bad; }
+ // PS2WEB(F3): deterministic emulation-state hash (EE base RAM, strided). Replaces the unreliable
+@@ -193,6 +195,7 @@ EMSCRIPTEN_BINDINGS(Play)
+ 	function("getJitBlocks", &getJitBlocks);
+ 	function("getDispatches", &getDispatches);
+ 	function("getExecMismatches", &getExecMismatches);
++	function("getFastMismatches", &getFastMismatches);
+ 	function("getChainMapEntries", &getChainMapEntries);
+ 	function("getChainTableMismatches", &getChainTableMismatches);
+ 	function("getStateHash", &getStateHash);

@@ -38,3 +38,4 @@ esos ficheros en modo BINARIO preservando `\r\n`. Verificar con `git diff --nums
 cambiadas deben ser pocas, no ~todo el fichero).
 
 - 07-per-executor-map.patch — W2.2b.2a: mapa PC→índice POR-EXECUTOR (miembro de CGenericMipsExecutor) + invalidación en DeleteBlock/Reset + accesor CBasicBlock::GetWasmTableIndex. SIN fast-path (no cambia ejecución). Gate: cube golden intacto + execMismatches==0. Todo #ifdef __EMSCRIPTEN__.
+- 08-fastpath-dispatch.patch — W2.2b.2b: fast-path en el bucle Execute (dispatch por la tabla per-executor, salta FindBlockAt + virtual Execute). Auditoría periódica vs FindBlockAt (fastMismatches, caza stale por reciclaje). CAMBIA ejecución → gate cube golden + fastMismatches==0. Mide vu1 fps. Shipping requiere T2 manual.

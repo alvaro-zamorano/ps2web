@@ -59,6 +59,7 @@ test(`bench ${FIXTURE}`, async ({ page }) => {
     chainMapEntries: samples.length ? (samples[samples.length - 1].chainMapEntries || 0) : 0,
     chainTableMismatches: samples.length ? (samples[samples.length - 1].chainTableMismatches) : -1,
     execMismatches: samples.length ? (samples[samples.length - 1].execMismatches) : -1,
+    fastMismatches: samples.length ? (samples[samples.length - 1].fastMismatches) : -1,
     stateHash: samples.length ? (samples[samples.length - 1].stateHash || 0) : 0,
     stateHashAtN: samples.length ? (samples[samples.length - 1].stateHashAtN || 0) : 0,
     totalFrames: samples.length ? (samples[samples.length - 1].totalFrames || 0) : 0,
@@ -82,12 +83,13 @@ test(`bench ${FIXTURE}`, async ({ page }) => {
     fs.writeFileSync(baselinePath, JSON.stringify(result, null, 2));
   }
 
-  console.log(`[bench] ${FIXTURE} avgFps=${result.avgFps} emu=${result.avgEmuSpeedPct}% p95ms=${result.p95MsPerFrame} threadsOk=${result.threadsOk} cores=${result.cores} jitMs=${result.jitCompileMs} jitBlocks=${result.jitBlocks} dispatch/s=${result.dispatchesPerSec} chainMap=${result.chainMapEntries} tblMismatch=${result.chainTableMismatches} execMismatch=${result.execMismatches} stateHash=${result.stateHash} stateHashAtN=${result.stateHashAtN} hashMatchesBaseline=${result.simdHashMatchesBaseline}`);
+  console.log(`[bench] ${FIXTURE} avgFps=${result.avgFps} emu=${result.avgEmuSpeedPct}% p95ms=${result.p95MsPerFrame} threadsOk=${result.threadsOk} cores=${result.cores} jitMs=${result.jitCompileMs} jitBlocks=${result.jitBlocks} dispatch/s=${result.dispatchesPerSec} chainMap=${result.chainMapEntries} tblMismatch=${result.chainTableMismatches} execMismatch=${result.execMismatches} fastMismatch=${result.fastMismatches} stateHash=${result.stateHash} stateHashAtN=${result.stateHashAtN} hashMatchesBaseline=${result.simdHashMatchesBaseline}`);
   // F3 correctness gate: cube's EE-state hash at a fixed frame is DETERMINISTIC and must not
   // change under dispatch-only JIT changes (chaining). vu1 is NOT gated on state (async VU1 =>
   // nondeterministic); vu1 is the speedup fixture (fps). See docs/BENCH-F3.md.
   expect(result.chainTableMismatches, 'flat linear-memory chain table must match the reference map (0 mismatches)').toBe(0);
   expect(result.execMismatches, 'per-executor map insert/lookup must be self-consistent (0 mismatches)').toBe(0);
+  expect(result.fastMismatches, 'fast-path dispatch must match FindBlockAt (0 stale entries)').toBe(0);
 
   if (FIXTURE === 'cube') {
     const gp = path.join(outDir, 'cube-golden.json');

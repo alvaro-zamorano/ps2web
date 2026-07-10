@@ -1,7 +1,7 @@
 # State
 
 ## Current Phase
-F3 W2.2b.2a en vuelo (patch 07): mapa PC→índice POR-EXECUTOR (miembro de CGenericMipsExecutor, se puebla en CreateBlock tras Compile) + invalidación (DeleteBlock/Reset) + accesor CBasicBlock::GetWasmTableIndex. SIN fast-path → no cambia ejecución. Gate: cube.stateHashAtN golden intacto Y execMismatches==0 (insert/lookup self-consistentes). Todo #ifdef __EMSCRIPTEN__. Es la estructura correcta (sin colisión EE/IOP/VU) para el fast-path W2.2b.2b. Pusheado, validando en CI.
+F3 W2.2b.2b en vuelo (patch 08): fast-path en el bucle Execute — dispatch por la tabla per-executor (salta FindBlockAt + virtual Execute), con auditoría periódica vs FindBlockAt (fastMismatches, caza stale por reciclaje). CAMBIA ejecución → gate: cube.stateHashAtN golden + execMismatches==0 + fastMismatches==0. Objetivo del turno: MEDIR vu1 fps (¿cuánto da saltarse FindBlockAt?). Expectativa: poco (la frontera C++↔wasm domina; el ≥2x lo daría W2.2b.2c, el loop residente en wasm). Pusheado, validando en CI.
 
 ## Completed
 - 2026-07-09: `.gsd/` scaffolding desde §5 + master plan en docs/.

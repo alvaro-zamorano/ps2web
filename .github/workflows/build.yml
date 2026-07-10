@@ -58,8 +58,16 @@ jobs:
           fi
       - name: Serve compatibility catalog as static assets (Sprint 1)
         run: |
-          cp -v ps2web/bench/compat.json   Play-/js/play_browser/public/compat.json
-          cp -v ps2web/bench/verified.json Play-/js/play_browser/public/verified.json
+          if [ -f ps2web/bench/compat.json ]; then
+            cp -v ps2web/bench/compat.json Play-/js/play_browser/public/compat.json
+          else
+            echo "WARN: bench/compat.json missing — library search will be empty (app tolerates it)"
+          fi
+          if [ -f ps2web/bench/verified.json ]; then
+            cp -v ps2web/bench/verified.json Play-/js/play_browser/public/verified.json
+          else
+            echo "WARN: bench/verified.json missing — no verified badges"
+          fi
 
       - name: Apply F2 build flags (threads pool 8 + fixed 1GB memory)
         run: bash ps2web/tools/apply_f2_flags.sh Play-

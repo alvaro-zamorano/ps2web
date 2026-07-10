@@ -1,0 +1,58 @@
+diff --git a/Source/BasicBlock.cpp b/Source/BasicBlock.cpp
+index 4c460e6..d4bb3ca 100644
+--- a/Source/BasicBlock.cpp
++++ b/Source/BasicBlock.cpp
+@@ -4,6 +4,12 @@
+ #include "MipsJitter.h"
+ #include "Jitter_CodeGenFactory.h"
+ 
++// PS2WEB(F3): JIT compile-cost instrumentation (shared across pthreads via linear memory).
++#include <atomic>
++#include <chrono>
++std::atomic<uint64_t> g_ps2webJitNs{0};
++std::atomic<uint32_t> g_ps2webJitBlocks{0};
++
+ #if defined(AOT_BUILD_CACHE) || defined(AOT_USE_CACHE)
+ #define AOT_ENABLED
+ #endif
+@@ -98,7 +104,10 @@ void CBasicBlock::Compile()
+ 		jitter->End();
+ 	}
+ 
++	auto _ps2webT0 = std::chrono::steady_clock::now();
+ 	m_function = CMemoryFunction(stream.GetBuffer(), stream.GetSize());
++	g_ps2webJitNs += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - _ps2webT0).count();
++	++g_ps2webJitBlocks;
+ 
+ #ifdef VTUNE_ENABLED
+ 	if(iJIT_IsProfilingActive() == iJIT_SAMPLING_ON)
+diff --git a/Source/ui_js/Main.cpp b/Source/ui_js/Main.cpp
+index 999e24c..b976ddc 100644
+--- a/Source/ui_js/Main.cpp
++++ b/Source/ui_js/Main.cpp
+@@ -1,4 +1,5 @@
+ #include <cstdio>
++#include <atomic>
+ #include <emscripten/bind.h>
+ #include "Ps2VmJs.h"
+ #include "GSH_OpenGLJs.h"
+@@ -139,6 +140,12 @@ void clearStats()
+ 	CStatsManager::GetInstance().ClearStats();
+ }
+ 
++// PS2WEB(F3): expose JIT compile cost (globals live in shared wasm memory, written by the EE worker).
++extern std::atomic<uint64_t> g_ps2webJitNs;
++extern std::atomic<uint32_t> g_ps2webJitBlocks;
++double getJitMs() { return g_ps2webJitNs.load() / 1e6; }
++int getJitBlocks() { return static_cast<int>(g_ps2webJitBlocks.load()); }
++
+ EMSCRIPTEN_BINDINGS(Play)
+ {
+ 	using namespace emscripten;
+@@ -147,4 +154,6 @@ EMSCRIPTEN_BINDINGS(Play)
+ 	function("bootDiscImage", &bootDiscImage);
+ 	function("getFrames", &getFrames);
+ 	function("clearStats", &clearStats);
++	function("getJitMs", &getJitMs);
++	function("getJitBlocks", &getJitBlocks);
+ }

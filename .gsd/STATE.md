@@ -1,7 +1,7 @@
 # State
 
 ## Current Phase
-F3 W1 (diseño) DONE. Fork de Play! BLOQUEADO: el token fine-grained no puede forkear ni crear repos (403 x2), solo push a repos existentes de Wcoach24. Fallback D10-compliant montado: serie de **patches versionados** en patches/ (main + patches/codegen/ para el submódulo), aplicados en CI. Listo para F3 W2 (batching). Fork real de GitHub queda opcional (requiere fork manual del usuario o token con Administration:write).
+F3 W2 en marcha. Primer patch: patches/01-jit-instrumentation.patch — instrumenta el coste del JIT (getJitMs/getJitBlocks exportados; atómicos en BasicBlock::Compile alrededor de CMemoryFunction). Overlay+harness reportan jitCompileMs/jitBlocks (cube+vu1). Sirve para cuantificar el coste del WebAssembly.Module-por-bloque antes del batching. Fork bloqueado → modelo patches/.
 
 ## Completed
 - 2026-07-09: `.gsd/` scaffolding desde §5 + master plan en docs/.

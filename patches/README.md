@@ -24,4 +24,4 @@ En un clon de Play- @ UPSTREAM.lock: editar → `git diff > /ruta/ps2web/patches
 nombres ya reflejan el historial deseado. Nada aquí se pierde.
 
 ## Estado
-- (vacío) — F3 W2 (batching, JIT-04) deja aquí su primer patch.
+- 01-jit-instrumentation.patch — mide jitCompileMs/jitBlocks (getJitMs/getJitBlocks exportados; contadores atómicos en BasicBlock::Compile). F3 W2.1.

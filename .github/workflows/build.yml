@@ -186,6 +186,8 @@ jobs:
           BENCH_SECONDS: "20"
           BENCH_WARMUP: "6"
         run: npx playwright test -c tests/harness/playwright.harness.config.js
+      - name: OPFS persistence E2E (F5 W1)
+        run: npx playwright test -c tests/e2e/playwright.e2e.config.js
       - name: Upload bench results
         if: always()
         uses: actions/upload-artifact@v4

@@ -1,7 +1,7 @@
 # State
 
 ## Current Phase
-F3 CERRADA (parcial, honesto — decisión B/fallback §9). F2 subió de verdad (threads+SIMD+mem fija). JIT-02 (≥2x chaining) NO alcanzado: medido que el lado C++ no aporta (cuello = frontera C++↔wasm); requiere W2.2b.2c (bucle residente en wasm), diferido como misión profunda. Andamiaje listo para retomarlo (gate cube golden, assert_speedup, instrumentación, mapa per-executor patch 07). Fast-path (patch 08) revertido por no aportar. SIGUIENTE: **F5 (OPFS e I/O)** — producto: arrastra una vez, juega siempre.
+F5 W1 en vuelo (OPFS DiskStore): overlay ps2web_diskstore.ts (save/list/load OPFS /games/) + window.__ps2web.{diskStore, importAndSave, bootElfFromOpfs} + E2E de persistencia (import→reload→sigue→bootea) en el job harness. Producto: arrastra una vez, juega siempre (IO-01). F3 cerrada parcial (fallback B). Pusheado, validando en CI.
 
 ## Completed
 - 2026-07-09: `.gsd/` scaffolding desde §5 + master plan en docs/.

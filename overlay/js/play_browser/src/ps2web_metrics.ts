@@ -4,6 +4,7 @@
 //   window.__ps2web_metrics = { fps, emuSpeedPct, msPerFrame, frameHash, ts }
 //   window.PlayModule        (the emscripten module, for the harness)
 //   window.__ps2web.bootElfFromUrl(url), window.__ps2web.ready
+import { DiskStore } from "./ps2web_diskstore"; // PS2WEB(F5)
 const TARGET_FPS = 59.94; // PS2 NTSC vsync (PAL=50). emuSpeedPct is vs NTSC; documented approx.
 
 export function startMetrics(playModule: any) {
@@ -37,6 +38,21 @@ export function startMetrics(playModule: any) {
 
   (window as any).__ps2web = {
     ready: true,
+    diskStore: DiskStore,
+    async importAndSave(url: string) { // fetch a served fixture and persist to OPFS
+      const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
+      const name = (url.split('/').pop() || 'game.elf');
+      await DiskStore.save(name, bytes);
+      return { name, size: bytes.length };
+    },
+    async bootElfFromOpfs(name: string) {
+      const bytes = await DiskStore.load(name);
+      const s = playModule.FS.open(name, 'w+');
+      playModule.FS.write(s, bytes, 0, bytes.length, 0);
+      playModule.FS.close(s);
+      playModule.bootElf(name);
+      return { name, size: bytes.length };
+    },
     async bootElfFromUrl(url: string) {
       const buf = new Uint8Array(await (await fetch(url)).arrayBuffer());
       const name = (url.split('/').pop() || 'fixture.elf');

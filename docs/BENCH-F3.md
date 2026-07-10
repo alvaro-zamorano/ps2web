@@ -70,3 +70,23 @@ la duración del bench.
   no afecta la media de fps).
 - vu1.stateHashAtN NO se usa como gate (async VU1). La corrección de VU1 se valida por cube +
   test visual/manual de la persona (T2).
+
+## W2.2b.2b — fast-path C++ (patch 08): MEDICIÓN CONCLUYENTE
+Comparación mismo pipeline, build sin fast-path (2a, run 29094944160) vs con fast-path (2b, run 29098912259):
+| fixture | avgFps sin | avgFps con | Δ |
+|---------|-----------:|-----------:|---:|
+| cube    | 56.35 | 56.45 | +0.2% |
+| vu1     | 53.25 | 51.70 | −2.9% |
+dispatchesPerSec idéntico (~1.85M vu1). Corrección OK (cube golden intacto, fast/exec Mismatches=0).
+
+**Conclusión (evidencia, no hipótesis):** saltarse `FindBlockAt` + el virtual `Execute` NO aporta
+fps. El coste dominante del dispatch es el **cruce C++↔wasm por bloque**, no el lookup. Las
+optimizaciones del lado C++ (2a/2b) están AGOTADAS. El ≥2x (JIT-02) requiere **eliminar la
+frontera**: W2.2b.2c = bucle de dispatch **residente en wasm** (`call_indirect` sin volver a C++),
+que exige emitir wasm a mano importando `__indirect_function_table`. Es la parte más profunda e
+incierta (¿lo soporta CWasmModuleBuilder? ¿se puede importar la tabla indirecta?).
+
+**Recomendación:** el fast-path (patch 08) no aporta → conviene desactivarlo/revertirlo para no
+cambiar la ejecución sin beneficio. Decisión de endgame de F3 pendiente (ver STATE): atacar 2c
+(deep, incierto) vs fallback del plan §9 (F2 ya subió con threads+SIMD; documentar JIT-02 parcial;
+avanzar F4/F5 que dan producto).

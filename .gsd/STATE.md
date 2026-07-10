@@ -1,7 +1,7 @@
 # State
 
 ## Current Phase
-F3 W2.2b.2b en vuelo (patch 08): fast-path en el bucle Execute — dispatch por la tabla per-executor (salta FindBlockAt + virtual Execute), con auditoría periódica vs FindBlockAt (fastMismatches, caza stale por reciclaje). CAMBIA ejecución → gate: cube.stateHashAtN golden + execMismatches==0 + fastMismatches==0. Objetivo del turno: MEDIR vu1 fps (¿cuánto da saltarse FindBlockAt?). Expectativa: poco (la frontera C++↔wasm domina; el ≥2x lo daría W2.2b.2c, el loop residente en wasm). Pusheado, validando en CI.
+F3 W2.2b.2b MEDIDO — CONCLUYENTE: el fast-path C++ NO aporta fps (vu1 53.25→51.7, −2.9%, dentro de ruido; cube +0.2%; dispatch idéntico). Evidencia: el cuello es el cruce C++↔wasm por bloque, no FindBlockAt. Optimización lado-C++ (2a/2b) AGOTADA. El ≥2x requiere W2.2b.2c (bucle de dispatch RESIDENTE en wasm, emitir wasm a mano importando __indirect_function_table) — deep e incierto. DECISIÓN DE ENDGAME F3 pendiente: (A) atacar 2c, (B) fallback del plan §9 (F2 ya subió; documentar JIT-02 parcial; avanzar F4/F5). Nota: conviene revertir/desactivar el fast-path (patch 08) por no aportar.
 
 ## Completed
 - 2026-07-09: `.gsd/` scaffolding desde §5 + master plan en docs/.
@@ -26,6 +26,8 @@ F3 W2.2b.2b en vuelo (patch 08): fast-path en el bucle Execute — dispatch por 
 - 2026-07-09: F3 W2.1 — instrumentación JIT (patch 01) verde. Datos reordenan F3: Palanca 2 (chaining) primero (el JIT-compile es minoritario en steady-state; el dispatch por bloque domina). Ver docs/BENCH-F3.md.
 
 - 2026-07-10: F3 gate de corrección = cube.stateHashAtN (determinista, golden 3049433245, aserción dura en harness). vu1 no-determinista (VU1 async en worker) → solo gate de speedup (fps). Evidencia: 2 runs de c826599.
+
+- 2026-07-10: F3 — MEDIDO que las optimizaciones C++ del dispatch (fast-path por tabla, saltar FindBlockAt) NO aportan fps (vu1 −2.9%). El cuello es la frontera C++↔wasm. El ≥2x exige el bucle residente en wasm (2c). Ver docs/BENCH-F3.md.
 
 ## Decisions Log
 - 2026-07-08: D1..D12 bloqueadas (docs/PS2WEB-MASTER-PLAN.md §1).

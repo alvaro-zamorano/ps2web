@@ -71,10 +71,39 @@ export async function bootFromOpfs(playModule: any, name: string): Promise<DiskE
   return { name, size: file.size };
 }
 
+// Stream a File into OPFS in bounded chunks. A PS2 DVD can be ~4.7 GB; loading it into a
+// single ArrayBuffer (a) blows up memory and (b) hits the hard limit
+// "FileSystemWritableFileStream.write can't take an ArrayBuffer(View) larger than 2 GB".
+// Writing File.slice() Blobs is lazy (disk-backed) and each write stays well under 2 GB.
+const IMPORT_CHUNK = 64 * 1024 * 1024; // 64 MB per write
+export async function saveFile(
+  file: File,
+  onProgress?: (written: number, total: number) => void,
+): Promise<DiskEntry> {
+  const dir = await gamesDir();
+  const fh = await dir.getFileHandle(file.name, { create: true });
+  const w = await fh.createWritable();
+  try {
+    let off = 0;
+    while (off < file.size) {
+      const end = Math.min(off + IMPORT_CHUNK, file.size);
+      await w.write(file.slice(off, end)); // Blob slice: bounded, no full-file buffer
+      off = end;
+      if (onProgress) onProgress(off, file.size);
+    }
+    await w.close(); // size 0 falls through here, creating an empty file
+  } catch (e) {
+    try { await (w as any).abort(); } catch { /* ignore */ }
+    throw e;
+  }
+  return { name: file.name, size: file.size };
+}
+
 // Import a File from the picker: persist to OPFS first (so it survives reload), then
 // return the entry. Booting is a separate explicit action from the library.
-export async function importFile(file: File): Promise<DiskEntry> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  await DiskStore.save(file.name, bytes);
-  return { name: file.name, size: bytes.length };
+export async function importFile(
+  file: File,
+  onProgress?: (written: number, total: number) => void,
+): Promise<DiskEntry> {
+  return saveFile(file, onProgress);
 }

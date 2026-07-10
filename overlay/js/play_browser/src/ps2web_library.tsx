@@ -64,7 +64,10 @@ export function Library({ ready }: { ready: boolean }) {
     if (!f) return;
     setStatus(`Importando ${f.name}…`);
     try {
-      const saved = await importFile(f);
+      const saved = await importFile(f, (written, total) => {
+        const pct = total ? Math.round((written / total) * 100) : 100;
+        setStatus(`Importando ${f.name}… ${pct}% (${fmtSize(written)}/${fmtSize(total)})`);
+      });
       setStatus(`Guardado en tu biblioteca: ${saved.name} (${fmtSize(saved.size)})`);
       await refresh();
     } catch (e: any) {

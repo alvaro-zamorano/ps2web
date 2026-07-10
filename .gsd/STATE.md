@@ -1,7 +1,7 @@
 # State
 
 ## Current Phase
-F3 W2.1 ✅ + ANALIZADO (docs/BENCH-F3.md): cube 56.2fps/1034blk/131ms, vu1 48.5fps/80.9%/1099blk/152ms. Hallazgo: JIT-compile NO domina steady-state (~0.13ms/blk, casi todo en warmup) → **reordenado: Palanca 2 (chaining por WebAssembly.Table) primero** (ahí vive el ≥2x, el coste es el round-trip de dispatch por bloque). vu1 (80.9%) = fixture de speedup. SIGUIENTE (W2.2): implementar chaining — toca CCodeGen_Wasm + submódulo, vía patches/codegen/. Grande y correctness-crítico.
+F3: fase de MEDICIÓN completa. dispatchesPerSec (run 29078672713): cube 156.9K, vu1 1.85M/seg (~35K disp/frame). Ese es el target que elimina la Palanca 2 (chaining). Ruido de runner ±10% (vu1 80.9↔88.7%) → 2x detectable, batching <5% no. SIGUIENTE: implementar Palanca 2 (chaining) en CCodeGen_Wasm vía patches/codegen/ — núcleo grande, correctness-crítico, varias iteraciones con frame-hash. Empieza por deep-read del emisor de epílogos de bloque.
 
 ## Completed
 - 2026-07-09: `.gsd/` scaffolding desde §5 + master plan en docs/.

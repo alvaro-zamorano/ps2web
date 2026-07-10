@@ -33,3 +33,19 @@ Rig: `ci-headless-swiftshader`. Referencia de speedup = **vu1** sobre el build F
 cube/vu1 tienen ~1000 bloques (huella de código minúscula). Un juego comercial tiene un orden
 de magnitud más → el coste de JIT-compile y el de dispatch escalan distinto. Los números de aquí
 son válidos como referencia RELATIVA en CI; el impacto en juegos reales lo mide la persona a mano.
+
+## W2.2-prep — dispatch rate (build F2 + patches 01+02), run 29078672713
+
+| fixture | avgFps | emu% | dispatchesPerSec | disp/frame | ns/disp (wall) |
+|---------|-------:|-----:|-----------------:|-----------:|---------------:|
+| cube    | 56.35  | 94.0 | 156,916          | 2,785      | 6,373          |
+| vu1     | 53.15  | 88.7 | 1,849,478        | 34,797     | 541            |
+
+**Target de la Palanca 2:** vu1 ejecuta ~1.85 M dispatches/seg. Cada dispatch = 1 iteración del
+bucle C++ `Execute` (`FindBlockAt` + call a wasm + return). El chaining elimina el round-trip
+quedándose en wasm entre bloques.
+
+**Ruido del rig:** vu1 osciló 80.9%→88.7% entre runs (variabilidad del runner GitHub). ⇒ para
+declarar speedup hay que superar ~±10%; el objetivo 2x (JIT-02) es detectable, mejoras <5%
+(p.ej. batching en micro-fixtures) NO lo son. Para medir F3 conviene promediar ≥3 runs o subir
+la duración del bench.

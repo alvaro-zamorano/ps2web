@@ -15,4 +15,13 @@ cd "$WORK"
 "$WORK/emit" 2
 "$WORK/emit" 32
 node "$HERE/check.mjs"
-echo "[emitter-check] OK — emitter produces valid, instantiable modules for N=1/2/32"
+
+# Link gate: upstream DECLARES CMemoryFunction's move ctor but never defines it. Our batching
+# move-constructs (CreateBatch's vector, Ps2webRepoint), which surfaced as
+# "undefined symbol: CMemoryFunction::CMemoryFunction(CMemoryFunction&&)" only after a 25-min
+# wasm build. Catch it here in seconds instead.
+echo "[emitter-check] link gate: CMemoryFunction move-construction"
+g++ -std=c++17 -I "$HERE/stub" -I "$CODEGEN/include" "-D__clear_cache(a,b)=((void)0)" \
+    "$HERE/linkcheck.cpp" "$CODEGEN/src/MemoryFunction.cpp" -o "$WORK/linkcheck"
+"$WORK/linkcheck"
+echo "[emitter-check] OK — emitter emits valid modules (N=1/2/32) and CMemoryFunction links"

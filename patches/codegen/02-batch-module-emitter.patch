@@ -220,7 +220,7 @@ index 3f86e4a..ac886eb 100644
  }
  
 diff --git a/src/MemoryFunction.cpp b/src/MemoryFunction.cpp
-index caae5a0..208579a 100644
+index caae5a0..521cbbb 100644
 --- a/src/MemoryFunction.cpp
 +++ b/src/MemoryFunction.cpp
 @@ -62,6 +62,23 @@ EM_JS(void, WasmDeleteFunction, (int fctId),
@@ -279,7 +279,31 @@ index caae5a0..208579a 100644
  #endif
  	ClearCache();
  #if !defined(MEMFUNC_USE_WASM)
-@@ -187,6 +222,7 @@ void CMemoryFunction::Reset()
+@@ -158,6 +193,23 @@ CMemoryFunction::~CMemoryFunction()
+ 	Reset();
+ }
+ 
++// PS2WEB(JIT-04): upstream DECLARES the move constructor but never defines it — nothing upstream
++// move-constructs a CMemoryFunction (CreateInstance relies on copy elision), so the missing symbol
++// was never linked. CreateBatch (vector<CMemoryFunction>) and CBasicBlock::Ps2webRepoint do move-
++// construct, hence "undefined symbol: CMemoryFunction::CMemoryFunction(CMemoryFunction&&)".
++// Same swap semantics as operator=(CMemoryFunction&&).
++CMemoryFunction::CMemoryFunction(CMemoryFunction&& rhs)
++: m_code(nullptr)
++, m_size(0)
++{
++	std::swap(m_code, rhs.m_code);
++	std::swap(m_size, rhs.m_size);
++#if defined(MEMFUNC_USE_WASM)
++	std::swap(m_wasmModule, rhs.m_wasmModule);
++	std::swap(m_ps2webModuleLifetime, rhs.m_ps2webModuleLifetime);
++#endif
++}
++
+ void CMemoryFunction::ClearCache()
+ {
+ #ifdef __APPLE__
+@@ -187,6 +239,7 @@ void CMemoryFunction::Reset()
  	m_size = 0;
  #if defined(MEMFUNC_USE_WASM)
  	m_wasmModule = emscripten::val();
@@ -287,7 +311,7 @@ index caae5a0..208579a 100644
  #endif
  }
  
-@@ -202,6 +238,7 @@ CMemoryFunction& CMemoryFunction::operator =(CMemoryFunction&& rhs)
+@@ -202,6 +255,7 @@ CMemoryFunction& CMemoryFunction::operator =(CMemoryFunction&& rhs)
  	std::swap(m_size, rhs.m_size);
  #if defined(MEMFUNC_USE_WASM)
  	std::swap(m_wasmModule, rhs.m_wasmModule);
@@ -295,7 +319,7 @@ index caae5a0..208579a 100644
  #endif
  	return (*this);
  }
-@@ -249,6 +286,7 @@ CMemoryFunction CMemoryFunction::CreateInstance()
+@@ -249,6 +303,7 @@ CMemoryFunction CMemoryFunction::CreateInstance()
  #if defined(MEMFUNC_USE_WASM)
  	CMemoryFunction result;
  	result.m_wasmModule = m_wasmModule;
@@ -303,7 +327,7 @@ index caae5a0..208579a 100644
  	result.m_size = m_size;
  	result.m_code = reinterpret_cast<void*>(WasmCreateFunction(m_wasmModule.as_handle()));
  	g_ps2webInstancesCreated.fetch_add(1, std::memory_order_relaxed); // PS2WEB(JIT-04)
-@@ -257,3 +295,37 @@ CMemoryFunction CMemoryFunction::CreateInstance()
+@@ -257,3 +312,37 @@ CMemoryFunction CMemoryFunction::CreateInstance()
  	return CMemoryFunction(GetCode(), GetSize());
  #endif
  }

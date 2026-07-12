@@ -1,0 +1,35 @@
+diff --git a/Source/ui_js/Main.cpp b/Source/ui_js/Main.cpp
+index c84c3325..39a3cb9c 100644
+--- a/Source/ui_js/Main.cpp
++++ b/Source/ui_js/Main.cpp
+@@ -159,6 +159,10 @@ extern std::atomic<uint32_t> g_ps2webJitBlocks;
+ extern std::atomic<uint64_t> g_ps2webDispatches;
+ extern std::atomic<uint32_t> g_ps2webExecMismatches;
+ extern std::atomic<uint32_t> g_ps2webFastMismatches;
++// PS2WEB(Sprint 2 / JIT-04): wasm module/instance baseline (defined in deps/CodeGen MemoryFunction.cpp).
++extern std::atomic<uint32_t> g_ps2webModulesCreated;
++extern std::atomic<uint32_t> g_ps2webInstancesCreated;
++extern std::atomic<uint64_t> g_ps2webModuleBytes;
+ extern std::unordered_map<uint32, uint32> g_ps2webChainMap;
+ extern std::mutex g_ps2webChainMapMtx;
+ uint32 ps2webChainLookup(uint32);
+@@ -167,6 +171,9 @@ int getJitBlocks() { return static_cast<int>(g_ps2webJitBlocks.load()); }
+ double getDispatches() { return static_cast<double>(g_ps2webDispatches.load()); }
+ int getExecMismatches() { return static_cast<int>(g_ps2webExecMismatches.load()); }
+ int getFastMismatches() { return static_cast<int>(g_ps2webFastMismatches.load()); }
++int getModulesCreated() { return static_cast<int>(g_ps2webModulesCreated.load()); }
++int getInstancesCreated() { return static_cast<int>(g_ps2webInstancesCreated.load()); }
++double getModuleBytes() { return static_cast<double>(g_ps2webModuleBytes.load()); }
+ int getChainMapEntries() { std::lock_guard<std::mutex> _l(g_ps2webChainMapMtx); return static_cast<int>(g_ps2webChainMap.size()); }
+ int getChainTableMismatches() { std::lock_guard<std::mutex> _l(g_ps2webChainMapMtx); int bad=0; for(auto& kv : g_ps2webChainMap) if(ps2webChainLookup(kv.first) != kv.second) ++bad; return bad; }
+ // PS2WEB(F3): deterministic emulation-state hash (EE base RAM, strided). Replaces the unreliable
+@@ -196,6 +203,9 @@ EMSCRIPTEN_BINDINGS(Play)
+ 	function("getDispatches", &getDispatches);
+ 	function("getExecMismatches", &getExecMismatches);
+ 	function("getFastMismatches", &getFastMismatches);
++	function("getModulesCreated", &getModulesCreated);
++	function("getInstancesCreated", &getInstancesCreated);
++	function("getModuleBytes", &getModuleBytes);
+ 	function("getChainMapEntries", &getChainMapEntries);
+ 	function("getChainTableMismatches", &getChainTableMismatches);
+ 	function("getStateHash", &getStateHash);

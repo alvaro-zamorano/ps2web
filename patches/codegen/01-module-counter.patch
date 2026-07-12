@@ -1,0 +1,40 @@
+diff --git a/src/MemoryFunction.cpp b/src/MemoryFunction.cpp
+index 73a3dab..caae5a0 100644
+--- a/src/MemoryFunction.cpp
++++ b/src/MemoryFunction.cpp
+@@ -80,6 +80,17 @@ EM_JS(emscripten::EM_VAL, WasmCreateModule, (uintptr_t code, uintptr_t size),
+ #error "No API to use for CMemoryFunction"
+ #endif
+ 
++#if defined(MEMFUNC_USE_WASM)
++#include <atomic>
++// PS2WEB(Sprint 2 / JIT-04): quantify the code-space problem. Today every MIPS basic block
++// becomes its OWN WebAssembly.Module (+Instance). Tens of thousands per commercial game
++// exhaust the browser's executable-memory budget ("failed to allocate executable memory for
++// module"). These counters are the pre-batching baseline. Read-only: no execution change.
++std::atomic<uint32_t> g_ps2webModulesCreated{0};
++std::atomic<uint32_t> g_ps2webInstancesCreated{0};
++std::atomic<uint64_t> g_ps2webModuleBytes{0};
++#endif
++
+ CMemoryFunction::CMemoryFunction()
+ : m_code(nullptr)
+ , m_size(0)
+@@ -132,6 +143,9 @@ CMemoryFunction::CMemoryFunction(const void* code, size_t size)
+ 	m_wasmModule = emscripten::val::take_ownership(WasmCreateModule(reinterpret_cast<uintptr_t>(code), size));
+ 	m_size = size;
+ 	m_code = reinterpret_cast<void*>(WasmCreateFunction(m_wasmModule.as_handle()));
++	g_ps2webModulesCreated.fetch_add(1, std::memory_order_relaxed);   // PS2WEB(JIT-04)
++	g_ps2webInstancesCreated.fetch_add(1, std::memory_order_relaxed); // PS2WEB(JIT-04)
++	g_ps2webModuleBytes.fetch_add(size, std::memory_order_relaxed);   // PS2WEB(JIT-04)
+ #endif
+ 	ClearCache();
+ #if !defined(MEMFUNC_USE_WASM)
+@@ -237,6 +251,7 @@ CMemoryFunction CMemoryFunction::CreateInstance()
+ 	result.m_wasmModule = m_wasmModule;
+ 	result.m_size = m_size;
+ 	result.m_code = reinterpret_cast<void*>(WasmCreateFunction(m_wasmModule.as_handle()));
++	g_ps2webInstancesCreated.fetch_add(1, std::memory_order_relaxed); // PS2WEB(JIT-04)
+ 	return result;
+ #else
+ 	return CMemoryFunction(GetCode(), GetSize());

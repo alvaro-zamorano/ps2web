@@ -59,6 +59,12 @@ test(`bench ${FIXTURE}`, async ({ page }) => {
     chainMapEntries: samples.length ? (samples[samples.length - 1].chainMapEntries || 0) : 0,
     chainTableMismatches: samples.length ? (samples[samples.length - 1].chainTableMismatches) : -1,
     execMismatches: samples.length ? (samples[samples.length - 1].execMismatches) : -1,
+    // JIT-04 code-space baseline: today ~1 wasm module per MIPS block. Batching must cut
+    // modulesCreated >=10x (blocksPerModule >= 10) with cube golden intact.
+    modulesCreated: samples.length ? (samples[samples.length - 1].modulesCreated || 0) : 0,
+    instancesCreated: samples.length ? (samples[samples.length - 1].instancesCreated || 0) : 0,
+    moduleBytes: samples.length ? (samples[samples.length - 1].moduleBytes || 0) : 0,
+    blocksPerModule: samples.length ? (samples[samples.length - 1].blocksPerModule || 0) : 0,
     stateHash: samples.length ? (samples[samples.length - 1].stateHash || 0) : 0,
     stateHashAtN: samples.length ? (samples[samples.length - 1].stateHashAtN || 0) : 0,
     totalFrames: samples.length ? (samples[samples.length - 1].totalFrames || 0) : 0,
@@ -83,6 +89,8 @@ test(`bench ${FIXTURE}`, async ({ page }) => {
   }
 
   console.log(`[bench] ${FIXTURE} avgFps=${result.avgFps} emu=${result.avgEmuSpeedPct}% p95ms=${result.p95MsPerFrame} threadsOk=${result.threadsOk} cores=${result.cores} jitMs=${result.jitCompileMs} jitBlocks=${result.jitBlocks} dispatch/s=${result.dispatchesPerSec} chainMap=${result.chainMapEntries} tblMismatch=${result.chainTableMismatches} execMismatch=${result.execMismatches} stateHash=${result.stateHash} stateHashAtN=${result.stateHashAtN} hashMatchesBaseline=${result.simdHashMatchesBaseline}`);
+  // JIT-04 baseline (Sprint 2 checkpoint): how many wasm modules does one fixture create?
+  console.log(`[jit-04] ${FIXTURE} modulesCreated=${result.modulesCreated} instancesCreated=${result.instancesCreated} moduleBytes=${result.moduleBytes} jitBlocks=${result.jitBlocks} blocksPerModule=${result.blocksPerModule}`);
   // F3 correctness gate: cube's EE-state hash at a fixed frame is DETERMINISTIC and must not
   // change under dispatch-only JIT changes (chaining). vu1 is NOT gated on state (async VU1 =>
   // nondeterministic); vu1 is the speedup fixture (fps). See docs/BENCH-F3.md.

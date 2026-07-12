@@ -11,7 +11,9 @@ export function startMetrics(playModule: any) {
   (window as any).PlayModule = playModule;
   const threadsOk = (window.crossOriginIsolated === true) && (typeof SharedArrayBuffer !== 'undefined');
   const cores = (navigator as any).hardwareConcurrency || 0;
-  const metrics = { fps: 0, emuSpeedPct: 0, msPerFrame: 0, frameHash: null as number | null, threadsOk, cores, jitCompileMs: 0, jitBlocks: 0, blockDispatches: 0, chainMapEntries: 0, chainTableMismatches: -1, execMismatches: -1, stateHash: 0, stateHashAtN: 0, totalFrames: 0, ts: Date.now() };
+  // PS2WEB(Sprint 2 / JIT-04): modulesCreated/instancesCreated/moduleBytes = the code-space
+  // baseline. Today ~1 wasm module per MIPS block; batching must cut modulesCreated >=10x.
+  const metrics = { fps: 0, emuSpeedPct: 0, msPerFrame: 0, frameHash: null as number | null, threadsOk, cores, jitCompileMs: 0, jitBlocks: 0, blockDispatches: 0, chainMapEntries: 0, chainTableMismatches: -1, execMismatches: -1, modulesCreated: 0, instancesCreated: 0, moduleBytes: 0, blocksPerModule: 0, stateHash: 0, stateHashAtN: 0, totalFrames: 0, ts: Date.now() };
   (window as any).__ps2web_metrics = metrics;
 
   let last = performance.now();
@@ -26,6 +28,13 @@ export function startMetrics(playModule: any) {
     try { metrics.chainMapEntries = playModule.getChainMapEntries(); } catch (e) {}
     try { metrics.chainTableMismatches = playModule.getChainTableMismatches(); } catch (e) {}
     try { metrics.execMismatches = playModule.getExecMismatches(); } catch (e) {}
+    try {
+      metrics.modulesCreated = playModule.getModulesCreated();
+      metrics.instancesCreated = playModule.getInstancesCreated();
+      metrics.moduleBytes = playModule.getModuleBytes();
+      metrics.blocksPerModule = metrics.modulesCreated > 0
+        ? Math.round((metrics.jitBlocks / metrics.modulesCreated) * 100) / 100 : 0;
+    } catch (e) {}
     try { metrics.stateHash = playModule.getStateHash(); } catch (e) {}
     try { metrics.stateHashAtN = playModule.getStateHashAtN(); metrics.totalFrames = playModule.getTotalFrames(); } catch (e) {}
     const fps = dt > 0 ? frames / dt : 0;

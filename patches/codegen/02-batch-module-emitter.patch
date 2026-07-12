@@ -221,27 +221,24 @@ index 3f86e4a..ac886eb 100644
  }
  
 diff --git a/src/MemoryFunction.cpp b/src/MemoryFunction.cpp
-index caae5a0..40f1365 100644
+index caae5a0..ee5a850 100644
 --- a/src/MemoryFunction.cpp
 +++ b/src/MemoryFunction.cpp
-@@ -62,6 +62,34 @@ EM_JS(void, WasmDeleteFunction, (int fctId),
+@@ -62,6 +62,46 @@ EM_JS(void, WasmDeleteFunction, (int fctId),
  {
  	removeFunction(fctId);
  });
-+// PS2WEB(JIT-04) DEBUG: stash the raw bytes of the first batch module and of one of the solo
-+// modules that fed it, so they can be pulled out of the browser and diffed offline. The bodies
-+// are copied verbatim and the type/import sections are identical, so if the batch misbehaves the
-+// difference must be visible in these bytes.
-+EM_JS(void, WasmDumpBatchDebug, (uintptr_t soloCode, uintptr_t soloSize, uintptr_t batchCode, uintptr_t batchSize),
++// PS2WEB(JIT-04): build the batch module and stash its exported functions, WITHOUT writing
++// anything back through HEAP32. The previous version did
++//     HEAP32[(outIds >> 2) + i] = addFunction(fct, 'vi');
++// which is fragile: this EM_JS runs on the EE pthread worker, and a stale/detached HEAP32 view
++// (or a pointer the JS side reads as negative) silently drops the write, leaving every table
++// index at 0. Re-pointing a block at indirect-table index 0 then traps on the first dispatch —
++// which is exactly how the emulator died, while mode 3 (which never USES the indices) survived.
++// Returning each index as a plain i32 return value removes that whole failure mode.
++EM_JS(int, WasmCreateBatchModule, (uintptr_t code, uintptr_t size, int count),
 +{
-+	if(Module.ps2webBatchDump) return; //first batch only
-+	Module.ps2webSoloDump  = Array.from(HEAPU8.subarray(soloCode,  soloCode  + soloSize));
-+	Module.ps2webBatchDump = Array.from(HEAPU8.subarray(batchCode, batchCode + batchSize));
-+	out(`PS2WEB(JIT-04) dumped solo=${soloSize}B batch=${batchSize}B`);
-+});
-+EM_JS(emscripten::EM_VAL, WasmCreateBatchModule, (uintptr_t code, uintptr_t size, int count, uintptr_t outIds),
-+{
-+	let moduleBytes = HEAP8.subarray(code, code + size);
++	let moduleBytes = HEAPU8.subarray(code, code + size);
 +	let module = new WebAssembly.Module(moduleBytes);
 +	let moduleInstance = new WebAssembly.Instance(module, {
 +		env: {
@@ -249,17 +246,32 @@ index caae5a0..40f1365 100644
 +			fctTable : Module.codeGenImportTable
 +		}
 +	});
++	Module.ps2webBatchModule = module;
++	Module.ps2webBatchFcts = [];
 +	for(let i = 0; i < count; i++)
 +	{
-+		let fct = moduleInstance.exports['codeGenFunc' + i];
-+		HEAP32[(outIds >> 2) + i] = addFunction(fct, 'vi');
++		Module.ps2webBatchFcts.push(moduleInstance.exports['codeGenFunc' + i]);
 +	}
++	return Module.ps2webBatchFcts.length;
++});
++// Register ONE batched function in the indirect table and hand its index back as a return value.
++EM_JS(int, WasmBatchAddFunction, (int index),
++{
++	let fct = Module.ps2webBatchFcts[index];
++	if(fct === undefined) return 0; //0 is never a valid block entry point -> caller aborts
++	return addFunction(fct, 'vi');
++});
++EM_JS(emscripten::EM_VAL, WasmTakeBatchModule, (),
++{
++	let module = Module.ps2webBatchModule;
++	Module.ps2webBatchModule = undefined;
++	Module.ps2webBatchFcts = undefined;
 +	return Emval.toHandle(module);
 +});
  EM_JS(emscripten::EM_VAL, WasmCreateModule, (uintptr_t code, uintptr_t size),
  {
  	//var fs = require('fs');
-@@ -89,6 +117,23 @@ EM_JS(emscripten::EM_VAL, WasmCreateModule, (uintptr_t code, uintptr_t size),
+@@ -89,6 +129,25 @@ EM_JS(emscripten::EM_VAL, WasmCreateModule, (uintptr_t code, uintptr_t size),
  std::atomic<uint32_t> g_ps2webModulesCreated{0};
  std::atomic<uint32_t> g_ps2webInstancesCreated{0};
  std::atomic<uint64_t> g_ps2webModuleBytes{0};
@@ -269,6 +281,8 @@ index caae5a0..40f1365 100644
 +std::atomic<int32_t> g_ps2webModulesLive{0};
 +std::atomic<uint32_t> g_ps2webModulesReleased{0};
 +std::atomic<uint32_t> g_ps2webBatchesEmitted{0};
++std::atomic<uint32_t> g_ps2webBatchBadIndices{0}; // PS2WEB(JIT-04): addFunction gave back index 0
++std::atomic<int32_t>  g_ps2webFirstBatchIndex{0};  // PS2WEB(JIT-04): so we can SEE a real index
 +std::atomic<uint32_t> g_ps2webBatchedBlocks{0};
 +
 +static std::shared_ptr<void> Ps2webMakeModuleLifetime()
@@ -283,7 +297,7 @@ index caae5a0..40f1365 100644
  #endif
  
  CMemoryFunction::CMemoryFunction()
-@@ -146,6 +191,7 @@ CMemoryFunction::CMemoryFunction(const void* code, size_t size)
+@@ -146,6 +205,7 @@ CMemoryFunction::CMemoryFunction(const void* code, size_t size)
  	g_ps2webModulesCreated.fetch_add(1, std::memory_order_relaxed);   // PS2WEB(JIT-04)
  	g_ps2webInstancesCreated.fetch_add(1, std::memory_order_relaxed); // PS2WEB(JIT-04)
  	g_ps2webModuleBytes.fetch_add(size, std::memory_order_relaxed);   // PS2WEB(JIT-04)
@@ -291,7 +305,7 @@ index caae5a0..40f1365 100644
  #endif
  	ClearCache();
  #if !defined(MEMFUNC_USE_WASM)
-@@ -158,6 +204,23 @@ CMemoryFunction::~CMemoryFunction()
+@@ -158,6 +218,23 @@ CMemoryFunction::~CMemoryFunction()
  	Reset();
  }
  
@@ -315,7 +329,7 @@ index caae5a0..40f1365 100644
  void CMemoryFunction::ClearCache()
  {
  #ifdef __APPLE__
-@@ -187,6 +250,7 @@ void CMemoryFunction::Reset()
+@@ -187,6 +264,7 @@ void CMemoryFunction::Reset()
  	m_size = 0;
  #if defined(MEMFUNC_USE_WASM)
  	m_wasmModule = emscripten::val();
@@ -323,7 +337,7 @@ index caae5a0..40f1365 100644
  #endif
  }
  
-@@ -202,6 +266,7 @@ CMemoryFunction& CMemoryFunction::operator =(CMemoryFunction&& rhs)
+@@ -202,6 +280,7 @@ CMemoryFunction& CMemoryFunction::operator =(CMemoryFunction&& rhs)
  	std::swap(m_size, rhs.m_size);
  #if defined(MEMFUNC_USE_WASM)
  	std::swap(m_wasmModule, rhs.m_wasmModule);
@@ -331,7 +345,7 @@ index caae5a0..40f1365 100644
  #endif
  	return (*this);
  }
-@@ -249,6 +314,7 @@ CMemoryFunction CMemoryFunction::CreateInstance()
+@@ -249,6 +328,7 @@ CMemoryFunction CMemoryFunction::CreateInstance()
  #if defined(MEMFUNC_USE_WASM)
  	CMemoryFunction result;
  	result.m_wasmModule = m_wasmModule;
@@ -339,7 +353,7 @@ index caae5a0..40f1365 100644
  	result.m_size = m_size;
  	result.m_code = reinterpret_cast<void*>(WasmCreateFunction(m_wasmModule.as_handle()));
  	g_ps2webInstancesCreated.fetch_add(1, std::memory_order_relaxed); // PS2WEB(JIT-04)
-@@ -257,3 +323,43 @@ CMemoryFunction CMemoryFunction::CreateInstance()
+@@ -257,3 +337,76 @@ CMemoryFunction CMemoryFunction::CreateInstance()
  	return CMemoryFunction(GetCode(), GetSize());
  #endif
  }
@@ -349,23 +363,56 @@ index caae5a0..40f1365 100644
 +std::vector<CMemoryFunction> CMemoryFunction::CreateBatch(const void* code, size_t size, uint32 count,
 +                                                          const void* soloCode, size_t soloSize)
 +{
-+	if(soloCode != nullptr)
-+	{
-+		WasmDumpBatchDebug(reinterpret_cast<uintptr_t>(soloCode), static_cast<uintptr_t>(soloSize),
-+		                   reinterpret_cast<uintptr_t>(code), static_cast<uintptr_t>(size));
-+	}
-+	std::vector<int32_t> tableIndices(count, 0);
-+	auto moduleHandle = WasmCreateBatchModule(
-+	    reinterpret_cast<uintptr_t>(code), static_cast<uintptr_t>(size),
-+	    static_cast<int>(count), reinterpret_cast<uintptr_t>(tableIndices.data()));
++	(void)soloCode;
++	(void)soloSize;
 +
-+	auto moduleValue = emscripten::val::take_ownership(moduleHandle);
++	int exported = WasmCreateBatchModule(reinterpret_cast<uintptr_t>(code),
++	                                     static_cast<uintptr_t>(size), static_cast<int>(count));
++	if(exported != static_cast<int>(count))
++	{
++		//The module didn't export what we asked for. Abort: better no batching than a bad jump.
++		g_ps2webBatchBadIndices.fetch_add(count, std::memory_order_relaxed);
++		return std::vector<CMemoryFunction>();
++	}
++
++	//Collect the indirect-table indices as RETURN VALUES (no HEAP32 round-trip).
++	std::vector<int32_t> tableIndices;
++	tableIndices.reserve(count);
++	bool ok = true;
++	for(uint32 i = 0; i < count; i++)
++	{
++		int tableIndex = WasmBatchAddFunction(static_cast<int>(i));
++		//0 is never a valid block entry point. Re-pointing a block at table index 0 traps on the
++		//very next dispatch, which is precisely how the emulator died before. Fail safe instead.
++		if(tableIndex == 0)
++		{
++			g_ps2webBatchBadIndices.fetch_add(1, std::memory_order_relaxed);
++			ok = false;
++		}
++		tableIndices.push_back(tableIndex);
++	}
++
++	auto moduleValue = emscripten::val::take_ownership(WasmTakeBatchModule());
++
++	if(!ok)
++	{
++		//Give the slots back and let the caller keep everything on its solo modules.
++		for(auto tableIndex : tableIndices)
++		{
++			if(tableIndex != 0) WasmDeleteFunction(tableIndex);
++		}
++		return std::vector<CMemoryFunction>();
++	}
 +
 +	g_ps2webModulesCreated.fetch_add(1, std::memory_order_relaxed);
 +	g_ps2webInstancesCreated.fetch_add(1, std::memory_order_relaxed);
 +	g_ps2webModuleBytes.fetch_add(size, std::memory_order_relaxed);
 +	g_ps2webBatchesEmitted.fetch_add(1, std::memory_order_relaxed);
 +	g_ps2webBatchedBlocks.fetch_add(count, std::memory_order_relaxed);
++	{
++		int32_t expected = 0;
++		g_ps2webFirstBatchIndex.compare_exchange_strong(expected, tableIndices[0]);
++	}
 +
 +	auto lifetime = Ps2webMakeModuleLifetime();
 +
@@ -374,8 +421,8 @@ index caae5a0..40f1365 100644
 +	for(uint32 i = 0; i < count; i++)
 +	{
 +		CMemoryFunction function;
-+		function.m_wasmModule = moduleValue;          //refcounted handle to the SAME module
-+		function.m_ps2webModuleLifetime = lifetime;   //last one out frees the module
++		function.m_wasmModule = moduleValue;        //refcounted handle to the SAME module
++		function.m_ps2webModuleLifetime = lifetime; //last one out frees the module
 +		function.m_size = size;
 +		function.m_code = reinterpret_cast<void*>(static_cast<uintptr_t>(tableIndices[i]));
 +		result.push_back(std::move(function));

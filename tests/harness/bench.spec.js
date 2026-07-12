@@ -81,6 +81,8 @@ test(`bench ${FIXTURE}`, async ({ page }) => {
     batchedBlocks: samples.length ? (samples[samples.length - 1].batchedBlocks || 0) : 0,
     batchSkipped: samples.length ? (samples[samples.length - 1].batchSkipped || 0) : 0,
     blocksPerLiveModule: samples.length ? (samples[samples.length - 1].blocksPerLiveModule || 0) : 0,
+    batchBadIndices: samples.length ? (samples[samples.length - 1].batchBadIndices || 0) : 0,
+    firstBatchIndex: samples.length ? (samples[samples.length - 1].firstBatchIndex || 0) : 0,
     stateHash: samples.length ? (samples[samples.length - 1].stateHash || 0) : 0,
     stateHashAtN: samples.length ? (samples[samples.length - 1].stateHashAtN || 0) : 0,
     totalFrames: samples.length ? (samples[samples.length - 1].totalFrames || 0) : 0,
@@ -98,22 +100,6 @@ test(`bench ${FIXTURE}`, async ({ page }) => {
     generatedAt: new Date().toISOString(),
   };
 
-  // JIT-04: pull the raw bytes of the first batch module (and one of the solo modules that fed
-  // it) out of the browser, so the emitted wasm can be diffed offline. This is the evidence that
-  // tells us WHY a batched body misbehaves when the identical body works standalone.
-  if (BATCH_MODE > 0) {
-    const dump = await page.evaluate(() => ({
-      solo: (window.PlayModule && window.PlayModule.ps2webSoloDump) || null,
-      batch: (window.PlayModule && window.PlayModule.ps2webBatchDump) || null,
-    }));
-    if (dump.batch) {
-      fs.writeFileSync(path.join(outDir, `wasm-dump-mode${BATCH_MODE}.json`), JSON.stringify(dump));
-      console.log(`[jit-04] dumped wasm: solo=${dump.solo ? dump.solo.length : 0}B batch=${dump.batch.length}B`);
-    } else {
-      console.log('[jit-04] no wasm dump (batcher never flushed)');
-    }
-  }
-
   const suffix = BATCH_MODE === 0 ? '' : `-mode${BATCH_MODE}`;
   fs.writeFileSync(path.join(outDir, `${FIXTURE}${suffix}.json`), JSON.stringify(result, null, 2));
   // Seed the immutable baseline ONLY if it doesn't exist yet (never overwrite).
@@ -125,6 +111,7 @@ test(`bench ${FIXTURE}`, async ({ page }) => {
   // JIT-04 baseline (Sprint 2 checkpoint): how many wasm modules does one fixture create?
   console.log(`[jit-04] ${FIXTURE} modulesCreated=${result.modulesCreated} instancesCreated=${result.instancesCreated} moduleBytes=${result.moduleBytes} jitBlocks=${result.jitBlocks} blocksPerModule=${result.blocksPerModule}`);
   // THE number: code-space is paid for LIVE modules. Batching must push blocksPerLiveModule >> 1.
+  console.log(`[jit-04] ${FIXTURE} badIndices=${result.batchBadIndices} firstBatchIndex=${result.firstBatchIndex} <-- 0 = addFunction never landed`);
   console.log(`[jit-04] ${FIXTURE} modulesLive=${result.modulesLive} released=${result.modulesReleased} batches=${result.batchesEmitted} batchedBlocks=${result.batchedBlocks} skipped=${result.batchSkipped} blocksPerLiveModule=${result.blocksPerLiveModule}`);
   // Batching gate: with 32-block batches the live-module count must collapse. Non-fatal if the
   // fixture is too small to fill a batch, but cube/vu1 produce ~1000 blocks so it must trigger.

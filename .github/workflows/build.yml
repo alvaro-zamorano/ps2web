@@ -230,6 +230,18 @@ jobs:
           BENCH_WARMUP: "6"
           BENCH_BATCH_MODE: "2"
         run: npx playwright test -c tests/harness/playwright.harness.config.js
+      # Mode 3 separates "building + registering the batch module" from "executing a batched
+      # body": the module is created and its 32 functions ARE added to the indirect table, but no
+      # block is re-pointed. Healthy => creation is harmless, the bodies are at fault.
+      # Dead => creating/registering the module is what breaks, not the bodies.
+      - name: JIT-04 bisect — cube mode 3 (build batch, do NOT re-point)
+        continue-on-error: true
+        env:
+          BENCH_FIXTURE: cube
+          BENCH_SECONDS: "20"
+          BENCH_WARMUP: "6"
+          BENCH_BATCH_MODE: "3"
+        run: npx playwright test -c tests/harness/playwright.harness.config.js
       - name: OPFS persistence E2E (F5 W1)
         run: npx playwright test -c tests/e2e/playwright.e2e.config.js
       - name: Upload bench results

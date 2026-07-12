@@ -32,7 +32,7 @@ index e2f1fbe..eb404b2 100644
  		static std::map<uintptr_t, WASM_FUNCTION_INFO> m_functions;
  	};
 diff --git a/include/MemoryFunction.h b/include/MemoryFunction.h
-index fca4a0f..3d511cf 100644
+index fca4a0f..65a7cd6 100644
 --- a/include/MemoryFunction.h
 +++ b/include/MemoryFunction.h
 @@ -1,6 +1,8 @@
@@ -44,7 +44,7 @@ index fca4a0f..3d511cf 100644
  
  #if defined(__EMSCRIPTEN__)
  #include <emscripten/bind.h>
-@@ -31,6 +33,15 @@ public:
+@@ -31,6 +33,16 @@ public:
  
  	CMemoryFunction CreateInstance();
  
@@ -54,13 +54,14 @@ index fca4a0f..3d511cf 100644
 +	// module. The shared lifetime is refcounted: when the last of the N is destroyed, the module
 +	// — and the browser code-space it occupies — is released. This is what makes the tiered
 +	// re-batching of docs/JIT-04-BATCHING.md actually reclaim memory.
-+	static std::vector<CMemoryFunction> CreateBatch(const void* code, size_t size, uint32 count);
++	static std::vector<CMemoryFunction> CreateBatch(const void* code, size_t size, uint32 count,
++	                                               const void* soloCode = nullptr, size_t soloSize = 0);
 +#endif
 +
  private:
  	void ClearCache();
  	void Reset();
-@@ -39,5 +50,8 @@ private:
+@@ -39,5 +51,8 @@ private:
  	size_t m_size;
  #if defined(__EMSCRIPTEN__)
  	emscripten::val m_wasmModule;
@@ -220,13 +221,24 @@ index 3f86e4a..ac886eb 100644
  }
  
 diff --git a/src/MemoryFunction.cpp b/src/MemoryFunction.cpp
-index caae5a0..521cbbb 100644
+index caae5a0..40f1365 100644
 --- a/src/MemoryFunction.cpp
 +++ b/src/MemoryFunction.cpp
-@@ -62,6 +62,23 @@ EM_JS(void, WasmDeleteFunction, (int fctId),
+@@ -62,6 +62,34 @@ EM_JS(void, WasmDeleteFunction, (int fctId),
  {
  	removeFunction(fctId);
  });
++// PS2WEB(JIT-04) DEBUG: stash the raw bytes of the first batch module and of one of the solo
++// modules that fed it, so they can be pulled out of the browser and diffed offline. The bodies
++// are copied verbatim and the type/import sections are identical, so if the batch misbehaves the
++// difference must be visible in these bytes.
++EM_JS(void, WasmDumpBatchDebug, (uintptr_t soloCode, uintptr_t soloSize, uintptr_t batchCode, uintptr_t batchSize),
++{
++	if(Module.ps2webBatchDump) return; //first batch only
++	Module.ps2webSoloDump  = Array.from(HEAPU8.subarray(soloCode,  soloCode  + soloSize));
++	Module.ps2webBatchDump = Array.from(HEAPU8.subarray(batchCode, batchCode + batchSize));
++	out(`PS2WEB(JIT-04) dumped solo=${soloSize}B batch=${batchSize}B`);
++});
 +EM_JS(emscripten::EM_VAL, WasmCreateBatchModule, (uintptr_t code, uintptr_t size, int count, uintptr_t outIds),
 +{
 +	let moduleBytes = HEAP8.subarray(code, code + size);
@@ -247,7 +259,7 @@ index caae5a0..521cbbb 100644
  EM_JS(emscripten::EM_VAL, WasmCreateModule, (uintptr_t code, uintptr_t size),
  {
  	//var fs = require('fs');
-@@ -89,6 +106,23 @@ EM_JS(emscripten::EM_VAL, WasmCreateModule, (uintptr_t code, uintptr_t size),
+@@ -89,6 +117,23 @@ EM_JS(emscripten::EM_VAL, WasmCreateModule, (uintptr_t code, uintptr_t size),
  std::atomic<uint32_t> g_ps2webModulesCreated{0};
  std::atomic<uint32_t> g_ps2webInstancesCreated{0};
  std::atomic<uint64_t> g_ps2webModuleBytes{0};
@@ -271,7 +283,7 @@ index caae5a0..521cbbb 100644
  #endif
  
  CMemoryFunction::CMemoryFunction()
-@@ -146,6 +180,7 @@ CMemoryFunction::CMemoryFunction(const void* code, size_t size)
+@@ -146,6 +191,7 @@ CMemoryFunction::CMemoryFunction(const void* code, size_t size)
  	g_ps2webModulesCreated.fetch_add(1, std::memory_order_relaxed);   // PS2WEB(JIT-04)
  	g_ps2webInstancesCreated.fetch_add(1, std::memory_order_relaxed); // PS2WEB(JIT-04)
  	g_ps2webModuleBytes.fetch_add(size, std::memory_order_relaxed);   // PS2WEB(JIT-04)
@@ -279,7 +291,7 @@ index caae5a0..521cbbb 100644
  #endif
  	ClearCache();
  #if !defined(MEMFUNC_USE_WASM)
-@@ -158,6 +193,23 @@ CMemoryFunction::~CMemoryFunction()
+@@ -158,6 +204,23 @@ CMemoryFunction::~CMemoryFunction()
  	Reset();
  }
  
@@ -303,7 +315,7 @@ index caae5a0..521cbbb 100644
  void CMemoryFunction::ClearCache()
  {
  #ifdef __APPLE__
-@@ -187,6 +239,7 @@ void CMemoryFunction::Reset()
+@@ -187,6 +250,7 @@ void CMemoryFunction::Reset()
  	m_size = 0;
  #if defined(MEMFUNC_USE_WASM)
  	m_wasmModule = emscripten::val();
@@ -311,7 +323,7 @@ index caae5a0..521cbbb 100644
  #endif
  }
  
-@@ -202,6 +255,7 @@ CMemoryFunction& CMemoryFunction::operator =(CMemoryFunction&& rhs)
+@@ -202,6 +266,7 @@ CMemoryFunction& CMemoryFunction::operator =(CMemoryFunction&& rhs)
  	std::swap(m_size, rhs.m_size);
  #if defined(MEMFUNC_USE_WASM)
  	std::swap(m_wasmModule, rhs.m_wasmModule);
@@ -319,7 +331,7 @@ index caae5a0..521cbbb 100644
  #endif
  	return (*this);
  }
-@@ -249,6 +303,7 @@ CMemoryFunction CMemoryFunction::CreateInstance()
+@@ -249,6 +314,7 @@ CMemoryFunction CMemoryFunction::CreateInstance()
  #if defined(MEMFUNC_USE_WASM)
  	CMemoryFunction result;
  	result.m_wasmModule = m_wasmModule;
@@ -327,15 +339,21 @@ index caae5a0..521cbbb 100644
  	result.m_size = m_size;
  	result.m_code = reinterpret_cast<void*>(WasmCreateFunction(m_wasmModule.as_handle()));
  	g_ps2webInstancesCreated.fetch_add(1, std::memory_order_relaxed); // PS2WEB(JIT-04)
-@@ -257,3 +312,37 @@ CMemoryFunction CMemoryFunction::CreateInstance()
+@@ -257,3 +323,43 @@ CMemoryFunction CMemoryFunction::CreateInstance()
  	return CMemoryFunction(GetCode(), GetSize());
  #endif
  }
 +
 +#if defined(MEMFUNC_USE_WASM)
 +// PS2WEB(JIT-04): see header. One module, N table entries, ONE shared refcounted lifetime.
-+std::vector<CMemoryFunction> CMemoryFunction::CreateBatch(const void* code, size_t size, uint32 count)
++std::vector<CMemoryFunction> CMemoryFunction::CreateBatch(const void* code, size_t size, uint32 count,
++                                                          const void* soloCode, size_t soloSize)
 +{
++	if(soloCode != nullptr)
++	{
++		WasmDumpBatchDebug(reinterpret_cast<uintptr_t>(soloCode), static_cast<uintptr_t>(soloSize),
++		                   reinterpret_cast<uintptr_t>(code), static_cast<uintptr_t>(size));
++	}
 +	std::vector<int32_t> tableIndices(count, 0);
 +	auto moduleHandle = WasmCreateBatchModule(
 +	    reinterpret_cast<uintptr_t>(code), static_cast<uintptr_t>(size),

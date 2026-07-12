@@ -98,6 +98,22 @@ test(`bench ${FIXTURE}`, async ({ page }) => {
     generatedAt: new Date().toISOString(),
   };
 
+  // JIT-04: pull the raw bytes of the first batch module (and one of the solo modules that fed
+  // it) out of the browser, so the emitted wasm can be diffed offline. This is the evidence that
+  // tells us WHY a batched body misbehaves when the identical body works standalone.
+  if (BATCH_MODE > 0) {
+    const dump = await page.evaluate(() => ({
+      solo: (window.PlayModule && window.PlayModule.ps2webSoloDump) || null,
+      batch: (window.PlayModule && window.PlayModule.ps2webBatchDump) || null,
+    }));
+    if (dump.batch) {
+      fs.writeFileSync(path.join(outDir, `wasm-dump-mode${BATCH_MODE}.json`), JSON.stringify(dump));
+      console.log(`[jit-04] dumped wasm: solo=${dump.solo ? dump.solo.length : 0}B batch=${dump.batch.length}B`);
+    } else {
+      console.log('[jit-04] no wasm dump (batcher never flushed)');
+    }
+  }
+
   const suffix = BATCH_MODE === 0 ? '' : `-mode${BATCH_MODE}`;
   fs.writeFileSync(path.join(outDir, `${FIXTURE}${suffix}.json`), JSON.stringify(result, null, 2));
   // Seed the immutable baseline ONLY if it doesn't exist yet (never overwrite).

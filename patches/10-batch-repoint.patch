@@ -105,7 +105,7 @@ index 08eed3d6..42d7d3a3 100644
  	void (*m_function)(void*);
  #endif
 diff --git a/Source/GenericMipsExecutor.h b/Source/GenericMipsExecutor.h
-index b0bd75ab..197e40db 100644
+index b0bd75ab..b269e6a3 100644
 --- a/Source/GenericMipsExecutor.h
 +++ b/Source/GenericMipsExecutor.h
 @@ -9,7 +9,20 @@
@@ -146,7 +146,7 @@ index b0bd75ab..197e40db 100644
  #endif
  		m_blocks.insert(std::move(block));
  	}
-@@ -177,6 +193,113 @@ protected:
+@@ -177,6 +193,131 @@ protected:
  		m_ps2webKey[h] = k; m_ps2webVal[h] = idx;
  		if(ps2webExecLookup(pc) != idx) g_ps2webExecMismatches.fetch_add(1, std::memory_order_relaxed);
  	}
@@ -225,11 +225,29 @@ index b0bd75ab..197e40db 100644
 +		Framework::CMemStream stream;
 +		builder.WriteModule(stream);
 +
++		//Dump the first batch (and one of its solo modules) for offline analysis.
++		const auto& soloBytes = batched[0]->Ps2webGetModuleBytes();
++
 +		auto functions = CMemoryFunction::CreateBatch(stream.GetBuffer(), stream.GetSize(),
-+		                                              static_cast<uint32>(batched.size()));
++		                                              static_cast<uint32>(batched.size()),
++		                                              soloBytes.data(), soloBytes.size());
 +		assert(functions.size() == batched.size());
 +
-+		bool keepSoloAlive = (g_ps2webBatchMode.load(std::memory_order_relaxed) == 1);
++		int32_t mode = g_ps2webBatchMode.load(std::memory_order_relaxed);
++
++		//BISECT mode 3: the batch module IS built and its 32 functions ARE registered in the
++		//indirect table (so table growth / addFunction side-effects happen), but NO block is
++		//re-pointed — everything keeps running on its solo function. If mode 3 is healthy, the
++		//act of creating the batch is harmless and the fault is in EXECUTING a batched body.
++		//If mode 3 dies too, the fault is in creating/registering the module, not in the bodies.
++		if(mode == 3)
++		{
++			for(auto& function : functions) m_ps2webKeepAlive.push_back(std::move(function));
++			for(auto& block : batched) block->Ps2webClearModuleBytes();
++			return;
++		}
++
++		bool keepSoloAlive = (mode == 1);
 +
 +		for(uint32 i = 0; i < batched.size(); i++)
 +		{

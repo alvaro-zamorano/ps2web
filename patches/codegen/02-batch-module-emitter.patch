@@ -1,0 +1,318 @@
+diff --git a/include/Jitter_CodeGen_Wasm.h b/include/Jitter_CodeGen_Wasm.h
+index e2f1fbe..534ca2b 100644
+--- a/include/Jitter_CodeGen_Wasm.h
++++ b/include/Jitter_CodeGen_Wasm.h
+@@ -1,6 +1,8 @@
+ #pragma once
+ 
+ #include <stack>
++#include <vector>
++#include <string>
+ #include "Jitter_CodeGen.h"
+ #include "MemStream.h"
+ 
+@@ -20,6 +22,14 @@ namespace Jitter
+ 		static void RegisterFunction(uintptr_t, const char*, const char*);
+ 		static const WASM_FUNCTION_INFO* FindFunction(uintptr_t);
+ 
++		// PS2WEB(JIT-04): canonical, deterministic signature table shared by EVERY module.
++		// call_indirect encodes a signature INDEX; if each module had its own type table,
++		// bodies compiled separately could not be concatenated into one batch module without
++		// silently corrupting those indices. All externs are registered up front (Ps2VmJs.cpp
++		// CreateVM) so this table is stable before any block compiles. "vi" (the block's own
++		// signature) is forced to index 0 — the Function section emits signature index 0.
++		static const std::vector<std::string>& GetCanonicalSignatures();
++
+ 	private:
+ 		static std::map<uintptr_t, WASM_FUNCTION_INFO> m_functions;
+ 	};
+diff --git a/src/Jitter_CodeGen_Wasm.cpp b/src/Jitter_CodeGen_Wasm.cpp
+index 3f86e4a..ff599d7 100644
+--- a/src/Jitter_CodeGen_Wasm.cpp
++++ b/src/Jitter_CodeGen_Wasm.cpp
+@@ -217,6 +217,32 @@ const CWasmFunctionRegistry::WASM_FUNCTION_INFO* CWasmFunctionRegistry::FindFunc
+ 	return &fctIterator->second;
+ }
+ 
++// PS2WEB(JIT-04): see header. Built once from the fully-populated extern registry.
++const std::vector<std::string>& CWasmFunctionRegistry::GetCanonicalSignatures()
++{
++	//Function-local static: C++11 guarantees thread-safe one-time init. Blocks compile on
++	//several threads (EE/VU), so a lazily-built shared vector would be a data race.
++	//Safe because every extern is registered in CPs2VmJs::CreateVM, before any block compiles.
++	static const std::vector<std::string> canonical = []() {
++		std::set<std::string> distinct;
++		for(const auto& fctPair : m_functions)
++		{
++			distinct.insert(fctPair.second.signature);
++		}
++		std::vector<std::string> result;
++		//"vi" is the block's own signature and MUST be canonical index 0
++		//(the Function section emits signature index 0 for every block).
++		result.push_back("vi");
++		distinct.erase("vi");
++		for(const auto& signature : distinct) //std::set => deterministic order
++		{
++			result.push_back(signature);
++		}
++		return result;
++	}();
++	return canonical;
++}
++
+ #else
+ 
+ void CWasmFunctionRegistry::RegisterFunction(uintptr_t functionPtr, const char* functionName, const char* functionSig)
+@@ -524,7 +550,33 @@ void CCodeGen_Wasm::BuildLabelFlows(const StatementList& statements)
+ 
+ void CCodeGen_Wasm::PrepareSignatures(CWasmModuleBuilder& moduleBuilder, const StatementList& statements)
+ {
+-	//Register this function's signature
++#ifdef __EMSCRIPTEN__
++	// PS2WEB(JIT-04): emit the FULL canonical type table into every module instead of only the
++	// signatures this block happens to use. That makes call_indirect signature indices identical
++	// in every module, which is the precondition for concatenating independently-compiled block
++	// bodies into a single batch module (docs/JIT-04-BATCHING.md §6). Cost: a few unused types
++	// per module (~40 bytes). "vi" stays at index 0, as the Function section requires.
++	// Confined to the emscripten path: other platforms keep upstream behaviour untouched.
++	for(const auto& signature : CWasmFunctionRegistry::GetCanonicalSignatures())
++	{
++		RegisterSignature(moduleBuilder, signature);
++	}
++
++	//Safety net: every signature this block calls must already be in the canonical table.
++	for(const auto& statement : statements)
++	{
++		if(statement.op != OP_CALL) continue;
++
++		auto src1 = statement.src1->GetSymbol().get();
++		assert(src1->m_type == SYM_CONSTANTPTR);
++
++		auto fctInfo = CWasmFunctionRegistry::FindFunction(src1->m_valueLow);
++		assert(fctInfo);
++		assert(!fctInfo->signature.empty());
++		assert(m_signatures.find(fctInfo->signature) != std::end(m_signatures));
++	}
++#else
++	//Upstream behaviour (per-module type table). Unused for the wasm build.
+ 	RegisterSignature(moduleBuilder, "vi");
+ 
+ 	for(const auto& statement : statements)
+@@ -545,6 +597,7 @@ void CCodeGen_Wasm::PrepareSignatures(CWasmModuleBuilder& moduleBuilder, const S
+ 			RegisterSignature(moduleBuilder, fctInfo->signature);
+ 		}
+ 	}
++#endif
+ }
+ 
+ void CCodeGen_Wasm::RegisterSignature(CWasmModuleBuilder& moduleBuilder, std::string signature)
+diff --git a/src/WasmModuleBuilder.cpp b/src/WasmModuleBuilder.cpp
+index 9f4ad6f..7e6d4e4 100644
+--- a/src/WasmModuleBuilder.cpp
++++ b/src/WasmModuleBuilder.cpp
+@@ -1,6 +1,7 @@
+ #include "WasmModuleBuilder.h"
+ #include <cassert>
+ #include <cstring>
++#include <string>
+ #include "WasmDefs.h"
+ 
+ static void WriteName(Framework::CStream& stream, const char* str)
+@@ -75,10 +76,22 @@ void CWasmModuleBuilder::AddFunction(FUNCTION function)
+ 	m_functions.push_back(std::move(function));
+ }
+ 
++// PS2WEB(JIT-04): emits a module with N functions (was: hardcoded to exactly 1).
++// N==1 is byte-identical to upstream (export name "codeGenFunc") so the single-block path
++// and the cube golden are untouched. N>1 exports "codeGenFunc0".."codeGenFuncN-1" and is
++// what lets us pack many MIPS blocks into ONE wasm module (see docs/JIT-04-BATCHING.md).
++// All block functions share signature index 0 ("vi"), which the canonical type table
++// (Jitter_CodeGen_Wasm::PrepareSignatures) guarantees is stable across every module.
++static std::string GetBlockExportName(uint32 index, uint32 functionCount)
++{
++	if(functionCount == 1) return "codeGenFunc"; //Upstream-compatible name
++	return "codeGenFunc" + std::to_string(index);
++}
++
+ void CWasmModuleBuilder::WriteModule(Framework::CStream& stream)
+ {
+-	//We only support a single function at the moment
+-	assert(m_functions.size() == 1);
++	assert(!m_functions.empty());
++	uint32 functionCount = static_cast<uint32>(m_functions.size());
+ 
+ 	stream.Write32(Wasm::BINARY_MAGIC);
+ 	stream.Write32(Wasm::BINARY_VERSION);
+@@ -120,7 +133,7 @@ void CWasmModuleBuilder::WriteModule(Framework::CStream& stream)
+ 		}
+ 	}
+ 
+-	//Section "Import"
++	//Section "Import" (unchanged: env.memory + env.fctTable)
+ 	{
+ 		WriteSectionHeader(stream, Wasm::SECTION_ID_IMPORT, 0x23);
+ 
+@@ -143,79 +156,107 @@ void CWasmModuleBuilder::WriteModule(Framework::CStream& stream)
+ 		stream.Write8(0x01); //Initial
+ 	}
+ 
+-	//Section "Function"
++	//Section "Function": N functions, all of signature index 0 ("vi")
+ 	{
+-		WriteSectionHeader(stream, Wasm::SECTION_ID_FUNCTION, 0x02);
++		uint32 sectionSize =
++		    GetULeb128Size(functionCount) +
++		    functionCount; //one byte per signature index (index 0)
+ 
+-		stream.Write8(1); //Function vector size
++		WriteSectionHeader(stream, Wasm::SECTION_ID_FUNCTION, sectionSize);
+ 
+-		//Function 0
+-		stream.Write8(0); //Signature index
++		WriteULeb128(stream, functionCount);
++		for(uint32 i = 0; i < functionCount; i++)
++		{
++			stream.Write8(0); //Signature index ("vi" is canonical index 0)
++		}
+ 	}
+ 
+-	//Section "Export"
++	//Section "Export": one export per function
+ 	{
+-		WriteSectionHeader(stream, Wasm::SECTION_ID_EXPORT, 15);
++		uint32 sectionSize = GetULeb128Size(functionCount);
++		for(uint32 i = 0; i < functionCount; i++)
++		{
++			auto name = GetBlockExportName(i, functionCount);
++			assert(name.length() < 0x80);
++			sectionSize +=
++			    1 + //Name length
++			    static_cast<uint32>(name.length()) +
++			    1 + //Export type
++			    GetULeb128Size(i);
++		}
+ 
+-		stream.Write8(1); //Export vector size
++		WriteSectionHeader(stream, Wasm::SECTION_ID_EXPORT, sectionSize);
+ 
+-		//Export 0
+-		WriteName(stream, "codeGenFunc");
+-		stream.Write8(Wasm::IMPORT_EXPORT_TYPE_FUNCTION);
+-		stream.Write8(0); //Function index
++		WriteULeb128(stream, functionCount);
++		for(uint32 i = 0; i < functionCount; i++)
++		{
++			auto name = GetBlockExportName(i, functionCount);
++			WriteName(stream, name.c_str());
++			stream.Write8(Wasm::IMPORT_EXPORT_TYPE_FUNCTION);
++			WriteULeb128(stream, i); //Function index
++		}
+ 	}
+ 
+-	//Section "Code"
++	//Section "Code": N bodies
+ 	{
+-		const auto& function = m_functions[0];
+-
+-		assert(function.localI32Count < 0x80);
+-		assert(function.localI64Count < 0x80);
+-		assert(function.localF32Count < 0x80);
+-		assert(function.localV128Count < 0x80);
+-
+-		uint32 localDeclCount = 0;
+-		if(function.localI32Count != 0) localDeclCount++;
+-		if(function.localI64Count != 0) localDeclCount++;
+-		if(function.localF32Count != 0) localDeclCount++;
+-		if(function.localV128Count != 0) localDeclCount++;
+-		uint32 localDeclSize = (localDeclCount * 2) + 1;
+-		uint32 functionBodySize = function.code.size() + localDeclSize;
+-
+-		uint32 sectionSize =
+-		    1 + //Vector size
+-		    GetULeb128Size(functionBodySize) +
+-		    functionBodySize;
++		const auto getLocalDeclCount =
++		    [](const FUNCTION& function) {
++			    uint32 localDeclCount = 0;
++			    if(function.localI32Count != 0) localDeclCount++;
++			    if(function.localI64Count != 0) localDeclCount++;
++			    if(function.localF32Count != 0) localDeclCount++;
++			    if(function.localV128Count != 0) localDeclCount++;
++			    return localDeclCount;
++		    };
++
++		uint32 sectionSize = GetULeb128Size(functionCount);
++		for(const auto& function : m_functions)
++		{
++			assert(function.localI32Count < 0x80);
++			assert(function.localI64Count < 0x80);
++			assert(function.localF32Count < 0x80);
++			assert(function.localV128Count < 0x80);
++
++			uint32 localDeclSize = (getLocalDeclCount(function) * 2) + 1;
++			uint32 functionBodySize = static_cast<uint32>(function.code.size()) + localDeclSize;
++			sectionSize += GetULeb128Size(functionBodySize) + functionBodySize;
++		}
+ 
+ 		WriteSectionHeader(stream, Wasm::SECTION_ID_CODE, sectionSize);
+ 
+-		stream.Write8(1); //Function vector size
++		WriteULeb128(stream, functionCount);
+ 
+-		//Function 0
+-		WriteULeb128(stream, functionBodySize); //Function body size
+-		WriteULeb128(stream, localDeclCount);   //Local declaration count
+-		if(function.localI32Count != 0)
++		for(const auto& function : m_functions)
+ 		{
+-			WriteULeb128(stream, function.localI32Count); //Local type count
+-			stream.Write8(Wasm::TYPE_I32);
+-		}
+-		if(function.localI64Count != 0)
+-		{
+-			WriteULeb128(stream, function.localI64Count);
+-			stream.Write8(Wasm::TYPE_I64);
+-		}
+-		if(function.localF32Count != 0)
+-		{
+-			WriteULeb128(stream, function.localF32Count);
+-			stream.Write8(Wasm::TYPE_F32);
+-		}
+-		if(function.localV128Count != 0)
+-		{
+-			WriteULeb128(stream, function.localV128Count);
+-			stream.Write8(Wasm::TYPE_V128);
+-		}
++			uint32 localDeclCount = getLocalDeclCount(function);
++			uint32 localDeclSize = (localDeclCount * 2) + 1;
++			uint32 functionBodySize = static_cast<uint32>(function.code.size()) + localDeclSize;
+ 
+-		stream.Write(function.code.data(), function.code.size());
++			WriteULeb128(stream, functionBodySize); //Function body size
++			WriteULeb128(stream, localDeclCount);   //Local declaration count
++			if(function.localI32Count != 0)
++			{
++				WriteULeb128(stream, function.localI32Count); //Local type count
++				stream.Write8(Wasm::TYPE_I32);
++			}
++			if(function.localI64Count != 0)
++			{
++				WriteULeb128(stream, function.localI64Count);
++				stream.Write8(Wasm::TYPE_I64);
++			}
++			if(function.localF32Count != 0)
++			{
++				WriteULeb128(stream, function.localF32Count);
++				stream.Write8(Wasm::TYPE_F32);
++			}
++			if(function.localV128Count != 0)
++			{
++				WriteULeb128(stream, function.localV128Count);
++				stream.Write8(Wasm::TYPE_V128);
++			}
++
++			stream.Write(function.code.data(), function.code.size());
++		}
+ 	}
+ }
+ 

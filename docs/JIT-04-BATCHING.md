@@ -129,7 +129,37 @@ reescribir el backend del codegen ni el matcher.
   el cube golden **podría no cubrirlo** (HANDOFF §3 #4).
 - Si el re-apuntado resulta no ser atómico respecto al executor (threads), parar y rediseñar.
 
-## 8. Gates (innegociables)
+## 8. Progreso de implementación
+
+### ✅ Etapa A — primitivos habilitantes (`patches/codegen/02-batch-module-emitter.patch`)
+
+Cambio **behavior-preserving**: el path de un bloque por módulo sigue funcionando igual.
+
+1. **Tabla de tipos canónica** (`Jitter_CodeGen_Wasm.cpp::PrepareSignatures`). Todos los módulos
+   emiten las **7 firmas** reales (`vi, iii, iiii, jii, jiji, viii, viji`), con **`"vi"` en el índice
+   0** (lo exige la Function section). Verificado que **los 17 externs se registran al arranque**
+   (`Ps2VmJs.cpp::CreateVM`), antes de compilar ningún bloque → la tabla es estable y no hay carrera.
+   Construida con un **static local de función** (init thread-safe por C++11), porque los bloques
+   compilan en varios hilos (EE/VU). Confinada a `#ifdef __EMSCRIPTEN__`: fuera de wasm, upstream
+   intacto.
+2. **`WriteModule` emite N funciones** (`WasmModuleBuilder.cpp`; antes: `assert(size()==1)` y
+   secciones function/export/code hardcodeadas a 1). **N==1 sigue exportando `codeGenFunc`** → el
+   glue de `MemoryFunction.cpp` no se toca y el cube golden queda protegido. N>1 exporta
+   `codeGenFunc0..N-1`.
+
+**Verificación offline** (`tools/wasm-emitter-check/`, cableada al CI como gate rápido): compila el
+`CWasmModuleBuilder` **real** contra un stub de `CStream`, emite N=1/2/32 y los **valida e instancia**
+en un motor wasm. Resultado: los tres válidos e instanciables, N=1 con `exports.codeGenFunc`, tabla
+de 7 tipos con `vi` en el 0. Corre en ~20 s → caza roturas de formato **antes** del build de 25 min.
+
+### ⬜ Etapa B — re-batching (lo que queda)
+- `CMemoryFunction` = (módulo, índice de export) en vez de (módulo, `codeGenFunc`) + glue EM_JS.
+- Acumulador de N bloques → re-emitir como 1 módulo → re-apuntar `fctId` (tabla + mapa patch 07) →
+  soltar los módulos solitarios.
+- Contadores `modulesLive` / `modulesReleased`.
+- **Test de estrés de reciclaje/SMC** (el cube golden podría no cubrirlo — HANDOFF §3 #4).
+
+## 9. Gates (innegociables)
 - `cube stateHashAtN == 3049433245` intacto.
 - `assert_speedup` sin regresión (±5%) — el batching no debe costar fps.
 - `modulesCreated` cae **≥10x** en un juego real (`blocksPerModule ≥ 10`).

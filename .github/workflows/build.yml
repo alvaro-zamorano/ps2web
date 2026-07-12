@@ -82,6 +82,12 @@ jobs:
             echo "apply (codegen): $f"; git -C Play-/deps/CodeGen apply --index "$GITHUB_WORKSPACE/$f"
           done
           echo "patches applied (or none)."
+      - name: Setup Node.js (emitter gate)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.17
+      - name: JIT-04 emitter gate (fast — validates emitted wasm before the 25-min build)
+        run: bash ps2web/tools/wasm-emitter-check/run.sh "$GITHUB_WORKSPACE/Play-/deps/CodeGen"
       - name: Setup Emscripten (pinned)
         uses: emscripten-core/setup-emsdk@v16
         with:

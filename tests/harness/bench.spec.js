@@ -101,6 +101,7 @@ test(`bench ${FIXTURE}`, async ({ page }) => {
     batchBadIndices: samples.length ? (samples[samples.length - 1].batchBadIndices || 0) : 0,
     firstBatchIndex: samples.length ? (samples[samples.length - 1].firstBatchIndex || 0) : 0,
     badInstances: samples.length ? (samples[samples.length - 1].badInstances || 0) : 0,
+    regionFallbacks: samples.length ? (samples[samples.length - 1].regionFallbacks || 0) : 0,
     stateHash: samples.length ? (samples[samples.length - 1].stateHash || 0) : 0,
     stateHashAtN: samples.length ? (samples[samples.length - 1].stateHashAtN || 0) : 0,
     totalFrames: samples.length ? (samples[samples.length - 1].totalFrames || 0) : 0,
@@ -137,17 +138,19 @@ test(`bench ${FIXTURE}`, async ({ page }) => {
   // JIT-04 baseline (Sprint 2 checkpoint): how many wasm modules does one fixture create?
   console.log(`[jit-04] ${FIXTURE} modulesCreated=${result.modulesCreated} instancesCreated=${result.instancesCreated} moduleBytes=${result.moduleBytes} jitBlocks=${result.jitBlocks} blocksPerModule=${result.blocksPerModule}`);
   // THE number: code-space is paid for LIVE modules. Batching must push blocksPerLiveModule >> 1.
-  console.log(`[jit-04] ${FIXTURE} badIndices=${result.batchBadIndices} firstBatchIndex=${result.firstBatchIndex} badInstances=${result.badInstances} <-- badInstances>0 = dedup hit a batch module with the wrong export name`);
+  console.log(`[jit-04] ${FIXTURE} badIndices=${result.batchBadIndices} firstBatchIndex=${result.firstBatchIndex} badInstances=${result.badInstances} regionFallbacks=${result.regionFallbacks} <-- fallbacks>0 = a region module failed to allocate`);
   console.log(`[jit-04] ${FIXTURE} modulesLive=${result.modulesLive} released=${result.modulesReleased} batches=${result.batchesEmitted} batchedBlocks=${result.batchedBlocks} skipped=${result.batchSkipped} blocksPerLiveModule=${result.blocksPerLiveModule}`);
   // Batching gate: with 32-block batches the live-module count must collapse. Non-fatal if the
   // fixture is too small to fill a batch, but cube/vu1 produce ~1000 blocks so it must trigger.
-  // JIT-04 production gate. Only mode 2 reclaims code-space: it releases the solo modules once
-  // their blocks live in a batch. Modes 1/3 keep them alive and are WORSE than no batching.
+  // JIT-04 v2 production gate (REGION compilation). There is no solo tier and nothing to release
+  // any more, so modulesReleased is expected to be 0. What proves the win now is that the
+  // CUMULATIVE module count collapses: we allocate ~1 module per K blocks instead of one per
+  // block. That is the number that decides whether a real game survives its compile avalanche.
   if (BATCH_MODE === 2 && result.jitBlocks > 200) {
-    expect(result.batchesEmitted, 'batcher must emit batch modules').toBeGreaterThan(0);
-    expect(result.blocksPerLiveModule, 'blocks per LIVE module (the code-space win)').toBeGreaterThan(10);
-    expect(result.modulesReleased, 'solo modules must actually be released').toBeGreaterThan(0);
-    expect(result.badInstances, 'dedup must never hit a batch module with the wrong export').toBe(0);
+    expect(result.batchesEmitted, 'region modules must be emitted').toBeGreaterThan(0);
+    expect(result.blocksPerModule, 'blocks per module ALLOCATED (the avalanche fix)').toBeGreaterThan(5);
+    expect(result.blocksPerLiveModule, 'blocks per LIVE module').toBeGreaterThan(5);
+    expect(result.badInstances, 'dedup must never hit a region module with the wrong export').toBe(0);
     expect(result.batchBadIndices, 'no invalid indirect-table indices').toBe(0);
   }
   // F3 correctness gate: cube's EE-state hash at a fixed frame is DETERMINISTIC and must not

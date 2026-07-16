@@ -1,27 +1,27 @@
 # PS2WEB
 
-**Tu PS2, en tu navegador. Tus juegos nunca salen de tu equipo.**
+**Your PS2, in your browser. Your games never leave your machine.**
 
-Emulador de PlayStation 2 en el navegador — fork *upstream-friendly* de
-[Play!](https://github.com/jpd002/Play-) con threads (SharedArrayBuffer), SIMD,
-recompilación JIT-a-wasm, render WebGPU y almacenamiento persistente OPFS.
-100% client-side, zero-install, **BYOR**.
+PlayStation 2 emulator in the browser — an *upstream-friendly* fork of
+[Play!](https://github.com/jpd002/Play-) with threads (SharedArrayBuffer), SIMD,
+JIT-to-wasm recompilation, WebGPU rendering and persistent OPFS storage.
+100% client-side, zero-install, **BYOR** (bring your own ROMs).
 
-> Estado: **F0 — toolchain y build reproducible** (ver `.gsd/ROADMAP.md`).
+> Status: **F0 — toolchain and reproducible build** (see `.gsd/ROADMAP.md`).
 
-## Cómo está organizado
+## Repository layout
 - `.gsd/` — spec stack (gsd-cowork): PROJECT, REQUIREMENTS, ROADMAP, STATE, CONTEXT, PLAN.
-- `docs/` — plan maestro y documentos de fase.
-- `tools/` — `build.sh` (build reproducible) y `serve.py` (servidor COOP/COEP).
-- `.github/workflows/build.yml` — build wasm en la nube (emsdk pinneado).
-- `tests/` — smoke test Playwright y fixtures homebrew (con licencia).
+- `docs/` — master plan and phase documents.
+- `tools/` — `build.sh` (reproducible build) and `serve.py` (COOP/COEP server).
+- `.github/workflows/build.yml` — cloud wasm build (pinned emsdk).
+- `tests/` — Playwright smoke test and licensed homebrew fixtures.
 
 ## Legal
-Ver [LEGAL.md](./LEGAL.md). No se distribuye ni aloja ninguna ROM/BIOS. El BIOS HLE de
-Play! hace innecesario cualquier BIOS de Sony.
+See [LEGAL.md](./LEGAL.md). No ROM/BIOS is distributed or hosted. Play!'s HLE BIOS
+makes any Sony BIOS unnecessary.
 
 ## Build
-Ver [BUILDING.md](./BUILDING.md).
+See [BUILDING.md](./BUILDING.md).
 
-## Handoff / estado
-Ver [docs/HANDOFF.md](./docs/HANDOFF.md) — estado honesto del proyecto y direcciones para retomarlo.
+## Handoff / status
+See [docs/HANDOFF.md](./docs/HANDOFF.md) — honest project status and directions to pick it back up.

@@ -1,66 +1,80 @@
-# PROFILE-DBZ — Fase 0 del PLAN-DBZ-FLUID (reparto del frame + árbol de decisión)
+# PROFILE-DBZ — Fase 0 del PLAN-DBZ-FLUID (reparto del frame + veredicto)
 
-> Salida OBLIGATORIA de la Fase 0. Este documento NO contiene optimización: solo mide el reparto
-> exacto del frame de DBZ BT3 (SLUS-21678) para decidir con datos qué cuello atacar (rama 1A/1B/1C).
-> Estado: **instrumentación lista y verificada; pendiente la medición real de Alvaro en gameplay.**
+> Salida OBLIGATORIA de la Fase 0. Mide el reparto exacto del frame de DBZ BT3 (SLUS-21678) para
+> decidir con datos qué cuello atacar. **VEREDICTO: GS-BOUND** (ver §5). Medido en gameplay real por
+> Alvaro sobre el build instrumentado (patch 11) desplegado en dist-ivory-phi-37.vercel.app.
 
 ---
 
 ## 1. Qué se instrumentó (patch `11-profile-fase0.patch`, read-only, `#ifdef __EMSCRIPTEN__`)
 
-Todo son contadores. Ninguno toca EE RAM → **el gate del cube (`stateHashAtN=3049433245`) es inmune**.
-`steady_clock` (no `emscripten_get_now`) para no meter un round-trip a JS en el bucle caliente.
+Contadores `steady_clock` acumulativos; ninguno toca EE RAM → gate del cube (`stateHashAtN=3049433245`) inmune.
 
-| Métrica en `window.__ps2web_metrics` | Getter wasm | Qué mide | Dónde |
+| Métrica | Getter | Qué mide | Dónde |
 |---|---|---|---|
-| `eeIdlePct` | `getEeIdlePct()` | % de EE ocioso en el intervalo (idle/total ticks) | `StatsManager` ← `CPS2VM` util info |
-| `drawCallsPerFrame` | `getDrawCalls()`/frames | draw calls por frame = carga de GS | `CStatsManager::GetDrawCalls` |
-| `framePctEe` | `getEeExecMs()` | % del tiempo del hilo EE en `ExecuteCpu` (dispatch+exec) | `CPS2VM::UpdateEe` |
-| `framePctVu` | `getVuExecMs()` | % del hilo EE en VU0+VU1 `Execute` | `CPS2VM::UpdateEe` |
-| `framePctGsStall` | `getGsStallMs()` | % del hilo EE **bloqueado** esperando al GS | `CGSHandler::SendGSCall` (waitForCompletion) |
-| `gsLoadPct` | `getGsBusyMs`/`getGsWaitMs` | % del **hilo GS** rasterizando vs. ocioso | `CGSHandler::ThreadProc` |
-| `eeExecMsS`,`vuExecMsS`,`gsBusyMsS`,`gsWaitMsS`,`gsStallMsS` | — | ms/seg crudos por subsistema (para depurar) | — |
-| `vuBlocks` | `getVuBlocks()` | bloques VU compilados en fresco (== módulos VU; la VU no batchea) | `CVuExecutor::BlockFactory` |
+| `eeIdlePct` | `getEeIdlePct()` | % EE ocioso (idle/total ticks) | StatsManager ← CPS2VM |
+| `drawCallsPerFrame` | `getDrawCalls()`/frames | draw calls por frame = carga GS | CStatsManager |
+| `framePctEe` | `getEeExecMs()` | % hilo EE en `ExecuteCpu` (dispatch+exec) | CPS2VM::UpdateEe |
+| `framePctVu` | `getVuExecMs()` | % hilo EE en VU0+VU1 | CPS2VM::UpdateEe |
+| `framePctGsStall` | `getGsStallMs()` | % hilo EE **bloqueado** esperando al GS | CGSHandler::SendGSCall |
+| `gsLoadPct` | `getGsBusyMs`/`getGsWaitMs` | % hilo GS rasterizando vs ocioso | CGSHandler::ThreadProc |
+| `vuBlocks` | `getVuBlocks()` | bloques VU en fresco (= módulos VU) | CVuExecutor::BlockFactory |
 
-`framePct*` normalizan al tiempo **atribuible** del hilo EE (`eeExec+vuExec+gsStall`); el resto
-(IOP/SPU/otros) no se reparte. `gsLoadPct` es del hilo GS, independiente.
+## 2. Protocolo de medición
 
-## 2. Protocolo de medición (Alvaro) — la única medida real
+CI valida golden con cube/vu1 (automático). La medida real de DBZ la aporta Alvaro pegando
+`window.__ps2web_metrics` en combate real (≥30 s tras warmup). El ISO no está en CI.
 
-El ISO no está en CI, así que la Fase 0 se valida en dos patas:
-- **CI (cube/vu1):** golden intacto + la instrumentación no rompe el harness (automático).
-- **Alvaro (DBZ BT3):** arrancar el juego en `https://dist-ivory-phi-37.vercel.app`, entrar a un
-  **combate real** (no menú), dejar correr **≥30 s** para pasar el warmup, y pegar:
-  ```js
-  copy(JSON.stringify(window.__ps2web_metrics, null, 2))   // en la consola del navegador
-  ```
-  Repetir en 2-3 momentos (combate abierto, muchos efectos, cámara cercana) para ver si el cuello
-  se mueve. Pega también `fps`/`emuSpeedPct` de cada muestra.
+## 3. RESULTADOS (gameplay real, combate — 2026-07-18)
 
-## 3. RESULTADOS (rellenar con las muestras de Alvaro)
+| muestra | fps | emuSpeed% | eeIdle% | framePctEe | framePctVu | framePctGsStall | gsLoad% | drawCalls/f | vuBlocks |
+|---|---|---|---|---|---|---|---|---|---|
+| combate 1 | 8.0 | 13.3 | **87.1** | 22.1 | **0.5** | **77.3** | **97.3** | **1197** | 91 |
 
-| muestra | fps | emuSpeed% | eeIdle% | framePctEe | framePctVu | framePctGsStall | gsLoad% | drawCalls/f | vuBlocks | jitBlocks | modulesCreated |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| combate 1 | _ | _ | _ | _ | _ | _ | _ | _ | _ | _ | _ |
-| combate 2 | _ | _ | _ | _ | _ | _ | _ | _ | _ | _ | _ |
-| efectos   | _ | _ | _ | _ | _ | _ | _ | _ | _ | _ | _ |
+Crudos por segundo (deltas): `eeExecMsS`=218, `vuExecMsS`=5, `gsStallMsS`=**763**, `gsBusyMsS`=**1000**, `gsWaitMsS`=28.
+Salud del batching: jitBlocks 38757 / modulesCreated 2655 (14.6/módulo), moduleBytes 25.6MB **sin OOM**,
+`staleReverts`=1, `execMismatches`/`badIndices`/`badInstances`=0, golden del cube intacto.
 
-## 4. ÁRBOL DE DECISIÓN (qué rama ejecutar, del PLAN §2)
+## 4. Lectura
 
-| Señal medida | Cuello | Rama |
-|---|---|---|
-| `eeIdlePct`~0, `framePctEe` domina, dispatches altísimos | **EE dispatch** | **1A** — tail-calls intra-región + 2c |
-| `framePctVu` domina | **VU1** | **1B** — batch VU + tail-calls VU + SIMD |
-| `eeIdlePct` alto + `framePctGsStall` alto + `gsLoad`~100% + drawCalls altos | **GS** | **1C** — frameskip → GL opts → WebGPU |
-| Nada >40%, todo repartido | mil cortes | 1A+1B+1C en serie |
+- El **hilo del GS está al 100%** (`gsBusyMsS`=1000 ms de cada 1000). Es el recurso saturado.
+- El **hilo del EE pasa el 77% de su tiempo atribuible BLOQUEADO** esperando al GS (`gsStallMsS`=763 ms/s),
+  y globalmente está **87% ocioso**. El EE tiene capacidad de sobra; no es el límite.
+- La **VU es despreciable** (0.5%, 5 ms/s; solo 91 bloques). La hipótesis "lucha 3D ⇒ VU pesada" NO se cumple
+  en este juego con este renderer.
+- **1197 draw calls/frame** es altísimo: es lo que satura al GS. Sumado a los warnings por-frame del backend
+  WebGL (`No texture bound`, `Invalid enum TEXTURE_SWIZZLE_R`), apunta a mucho trabajo de GS redundante/no batcheado.
 
-## 5. Veredicto (rellenar tras la medición)
+## 5. VEREDICTO — GS-BOUND → rama **FASE 1C**
 
-_Cuello #1 identificado: ____. Rama elegida: ____. Checkpoint con Alvaro antes de comprometer la
-rama grande (1A.1 tail-calls / 1C.3 WebGPU)._
+| Señal | Del árbol de decisión | Medido | ¿Cumple? |
+|---|---|---|---|
+| EE ocioso alto | sí | **87.1%** | ✅ |
+| `framePctGsStall` alto | sí | **77.3%** | ✅ |
+| `gsLoadPct` ~100% | sí | **97.3%** | ✅ |
+| draw calls altos | sí | **1197/f** | ✅ |
 
-## 6. Nota de honestidad
+**Cuello #1 = GS (rasterizado WebGL2).** Descartadas por datos: **1A** (EE dispatch/2c — el EE está 87%
+ocioso, acelerarlo no da fps) y **1B** (VU — 0.5%). El plan lo predijo: "atacar el cuello medido, no el
+supuesto". El loop residente 2c, hero asumido del proyecto, **no habría movido la aguja en DBZ**.
 
-Esto mide; no acelera. El objetivo de la Fase 0 es no quemar semanas de CI adivinando. La palabra
-"infalible" del plan aplica al **método** (medir → atacar el cuello medido → verificar con gate),
-no al resultado: DBZ BT3 a 30 fps es un salto de 5-10x y ningún plan honesto lo promete de antemano.
+## 6. Plan de la rama 1C (orden por valor/riesgo)
+
+1. **Frameskip** (frontend/overlay, riesgo bajo, además diagnóstico): desacoplar el ritmo del EE del
+   render, saltar el dibujado de N de cada N+1 frames. Kill-switch `setGsFrameskip(n)`. Si sube la
+   velocidad de emulación, confirma el cuello de GS de forma independiente. **Primer paso.**
+2. **Optimización del backend WebGL** (`GSH_OpenGLJs`): cache de estado GL (evitar bind/texParameter
+   redundantes — arreglar el `TEXTURE_SWIZZLE_R`), batch de draw calls (bajar de ~1200/frame), cache de
+   texturas. Ataca la causa (1197 draws/f).
+3. **WebGPU (F4)**: reescribir el backend GS. El proyecto más grande; solo si 1+2 no bastan. Medir antes.
+
+## 7. STOP honesto
+
+Si tras el frameskip + opts de WebGL la mejora real en DBZ es <1.3x y el reparto no muestra un cuello #2
+claro, se declara el techo del rasterizado en navegador con datos. Objetivo: 30 fps ≈ 50% (5x sobre 8 fps).
+
+## 8. Nota de método
+
+Una sola muestra ya es concluyente por lo extremo del reparto (EE 87% ocioso, GS 100%). Más muestras en
+escenas con más efectos solo reforzarían el veredicto (más draws ⇒ más GS-bound). Esto mide; no acelera:
+Fase 0 evitó quemar semanas de CI en 2c, que no era el cuello.

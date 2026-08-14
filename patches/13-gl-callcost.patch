@@ -1,0 +1,151 @@
+diff --git a/Source/BasicBlock.cpp b/Source/BasicBlock.cpp
+index 23917b95..fec4dc33 100644
+--- a/Source/BasicBlock.cpp
++++ b/Source/BasicBlock.cpp
+@@ -51,6 +51,20 @@ std::atomic<uint32_t> g_ps2webVuBlocks{0};
+ // drains faster and the EE — which measured 87% idle, 77% blocked on the GS — stops stalling.
+ // Runtime kill-switch: setGsFrameskip(n). Presentation-only: never touches EE RAM.
+ std::atomic<int32_t> g_ps2webGsFrameskip{0};
++// PS2WEB(FASE 1C.2): GS diagnostic bisect. The GS thread is 100% busy in DBZ BT3, but "busy" can be
++// two very different things, and they point at OPPOSITE fixes:
++//   fill-rate bound (rasterizing pixels)  -> batching draw calls will NOT help; the fix is WebGPU/
++//                                            lower internal resolution.
++//   call-overhead bound (per-draw GL work) -> batching + state caching IS the fix (each WebGL call
++//                                            pays a wasm->JS crossing; ~1200 draws/frame).
++// One build, three hypotheses, switchable at runtime — the pattern that has cracked every previous
++// unknown in this project. Diagnostic only, DEFAULT 0, never touches EE RAM (cube golden immune):
++//   0 = normal.
++//   1 = do all state setup + vertex upload, but SKIP glDrawArrays  -> isolates rasterization cost.
++//   2 = skip the whole render pass (setup + upload + draw)         -> total cost of the pass.
++// gsBusyMsS(0) - gsBusyMsS(1) = time spent rasterizing.
++// gsBusyMsS(1) - gsBusyMsS(2) = time spent on state/upload (what batching would attack).
++std::atomic<int32_t> g_ps2webGsDiag{0};
+ // PS2WEB(F3 W2.2a): PC->wasm table-index map (foundation for chaining; NOT used for execution yet).
+ #include <unordered_map>
+ #include <mutex>
+diff --git a/Source/gs/GSH_OpenGL/GSH_OpenGL.cpp b/Source/gs/GSH_OpenGL/GSH_OpenGL.cpp
+index 691d6405..8befdafe 100644
+--- a/Source/gs/GSH_OpenGL/GSH_OpenGL.cpp
++++ b/Source/gs/GSH_OpenGL/GSH_OpenGL.cpp
+@@ -11,6 +11,7 @@
+ // PS2WEB(FASE 1C): GS frameskip (defined in BasicBlock.cpp). Set from JS via setGsFrameskip(n).
+ // s_ps2web* are read/written ONLY on the GS thread (FlipImpl + DoRenderPass) → no race.
+ extern std::atomic<int32_t> g_ps2webGsFrameskip;
++extern std::atomic<int32_t> g_ps2webGsDiag; // PS2WEB(FASE 1C.2): 0=normal, 1=skip glDrawArrays, 2=skip pass
+ #if defined(__EMSCRIPTEN__)
+ static uint32 s_ps2webGsFrameIndex = 0;
+ static bool s_ps2webSkipDraw = false;
+@@ -215,7 +216,11 @@ void CGSH_OpenGL::FlipImpl(const DISPLAY_INFO& dispInfo)
+ 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+ 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+ 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++#if !defined(__EMSCRIPTEN__)
++		// PS2WEB(FASE 1C.2): GL_TEXTURE_SWIZZLE_R is not part of WebGL2 — this call only ever
++		// produced "Invalid enum value TEXTURE_SWIZZLE_R". Skipping it in wasm changes nothing.
+ 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, GL_RED);
++#endif
+ 
+ 		glUseProgram(*m_presentProgram);
+ 
+@@ -1750,6 +1755,8 @@ void CGSH_OpenGL::DoRenderPass()
+ 	// frame re-applies whatever it needs; the pending vertices are cleared by FlushVertexBuffer after
+ 	// we return. Not counted in m_drawCallCount so drawCallsPerFrame reflects real GPU draws.
+ 	if(s_ps2webSkipDraw) return;
++	// PS2WEB(FASE 1C.2) diag mode 2: skip the entire pass (setup + upload + draw).
++	if(g_ps2webGsDiag.load(std::memory_order_relaxed) == 2) return;
+ #endif
+ 	if((m_validGlState & GLSTATE_VERTEX_PARAMS) == 0)
+ 	{
+@@ -1817,6 +1824,35 @@ void CGSH_OpenGL::DoRenderPass()
+ 	{
+ 		glActiveTexture(GL_TEXTURE0);
+ 		glBindTexture(GL_TEXTURE_2D, m_renderState.texture0Handle);
++#if defined(__EMSCRIPTEN__)
++		// PS2WEB(FASE 1C.2): two per-draw-call GL errors removed. This block runs once per draw call
++		// (~1200/frame in DBZ BT3, where the GS thread is 100% busy — see docs/PROFILE-DBZ.md), and
++		// every failed GL call still pays the wasm->JS crossing plus the browser's error bookkeeping.
++		//  1. glTexParameteri on handle 0 is a no-op that WebGL rejects with
++		//     "No texture bound to TEXTURE_2D" — skip it entirely when nothing is bound.
++		//  2. GL_TEXTURE_SWIZZLE_R does NOT exist in WebGL2 ("Invalid enum value TEXTURE_SWIZZLE_R"),
++		//     so this call has ALWAYS failed here: dropping it is behaviour-preserving in wasm.
++		//     NOTE: that means alphaAsIndex (IDTEX palettes) was never actually applied in the browser
++		//     — a likely source of the reported texture glitches. Fixing it belongs in the shader and
++		//     is a CORRECTNESS task, tracked separately; this patch only stops paying for the error.
++		if(m_renderState.texture0Handle != 0)
++		{
++			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, m_renderState.texture0MinFilter);
++			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, m_renderState.texture0MagFilter);
++			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, m_renderState.texture0WrapS);
++			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, m_renderState.texture0WrapT);
++		}
++
++		glActiveTexture(GL_TEXTURE1);
++		glBindTexture(GL_TEXTURE_2D, m_renderState.texture1Handle);
++		if(m_renderState.texture1Handle != 0)
++		{
++			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++		}
++#else
+ 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, m_renderState.texture0MinFilter);
+ 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, m_renderState.texture0MagFilter);
+ 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, m_renderState.texture0WrapS);
+@@ -1829,6 +1865,7 @@ void CGSH_OpenGL::DoRenderPass()
+ 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+ 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+ 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++#endif
+ 
+ 		m_validGlState |= GLSTATE_TEXTURE;
+ 	}
+@@ -1868,7 +1905,17 @@ void CGSH_OpenGL::DoRenderPass()
+ 		break;
+ 	}
+ 
++#if defined(__EMSCRIPTEN__)
++	// PS2WEB(FASE 1C.2) diag mode 1: everything above (state + glBufferData upload) still runs; only
++	// the rasterization is skipped. Comparing gsBusyMsS against mode 0 isolates how much of the
++	// saturated GS thread is actually filling pixels vs. paying per-draw GL overhead.
++	if(g_ps2webGsDiag.load(std::memory_order_relaxed) != 1)
++	{
++		glDrawArrays(primitiveMode, 0, m_vertexBuffer.size());
++	}
++#else
+ 	glDrawArrays(primitiveMode, 0, m_vertexBuffer.size());
++#endif
+ 
+ 	m_drawCallCount++;
+ }
+diff --git a/Source/ui_js/Main.cpp b/Source/ui_js/Main.cpp
+index 35feba66..20275ad7 100644
+--- a/Source/ui_js/Main.cpp
++++ b/Source/ui_js/Main.cpp
+@@ -189,6 +189,7 @@ extern std::atomic<uint64_t> g_ps2webGsWaitNs;
+ extern std::atomic<uint64_t> g_ps2webGsStallNs;
+ extern std::atomic<uint32_t> g_ps2webVuBlocks;
+ extern std::atomic<int32_t>  g_ps2webGsFrameskip; // PS2WEB(FASE 1C)
++extern std::atomic<int32_t>  g_ps2webGsDiag;      // PS2WEB(FASE 1C.2) diagnostic bisect
+ extern std::unordered_map<uint32, uint32> g_ps2webChainMap;
+ extern std::mutex g_ps2webChainMapMtx;
+ uint32 ps2webChainLookup(uint32);
+@@ -235,6 +236,9 @@ int getDrawCalls() { return static_cast<int>(CStatsManager::GetInstance().GetDra
+ // PS2WEB(FASE 1C): GS frameskip kill-switch. 0=off (default). n>0 renders 1 of every n+1 frames.
+ void setGsFrameskip(int n) { g_ps2webGsFrameskip.store(n < 0 ? 0 : n); }
+ int getGsFrameskip() { return static_cast<int>(g_ps2webGsFrameskip.load()); }
++// PS2WEB(FASE 1C.2): GS diagnostic bisect (0=normal, 1=no rasterization, 2=no render pass).
++void setGsDiag(int n) { g_ps2webGsDiag.store((n < 0 || n > 2) ? 0 : n); }
++int getGsDiag() { return static_cast<int>(g_ps2webGsDiag.load()); }
+ int getChainMapEntries() { std::lock_guard<std::mutex> _l(g_ps2webChainMapMtx); return static_cast<int>(g_ps2webChainMap.size()); }
+ int getChainTableMismatches() { std::lock_guard<std::mutex> _l(g_ps2webChainMapMtx); int bad=0; for(auto& kv : g_ps2webChainMap) if(ps2webChainLookup(kv.first) != kv.second) ++bad; return bad; }
+ // PS2WEB(F3): deterministic emulation-state hash (EE base RAM, strided). Replaces the unreliable
+@@ -289,6 +293,8 @@ EMSCRIPTEN_BINDINGS(Play)
+ 	function("getDrawCalls", &getDrawCalls);
+ 	function("setGsFrameskip", &setGsFrameskip);
+ 	function("getGsFrameskip", &getGsFrameskip);
++	function("setGsDiag", &setGsDiag);
++	function("getGsDiag", &getGsDiag);
+ 	function("getChainMapEntries", &getChainMapEntries);
+ 	function("getChainTableMismatches", &getChainTableMismatches);
+ 	function("getStateHash", &getStateHash);

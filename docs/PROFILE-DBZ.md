@@ -78,3 +78,31 @@ claro, se declara el techo del rasterizado en navegador con datos. Objetivo: 30 
 Una sola muestra ya es concluyente por lo extremo del reparto (EE 87% ocioso, GS 100%). Más muestras en
 escenas con más efectos solo reforzarían el veredicto (más draws ⇒ más GS-bound). Esto mide; no acelera:
 Fase 0 evitó quemar semanas de CI en 2c, que no era el cuello.
+
+## 9. FASE 1C paso 1 — FRAMESKIP (patch 12): VALIDADO (2026-07-20)
+
+`setGsFrameskip(n)` (default 0=off). n>0 renderiza 1 de cada n+1 frames: `CGSH_OpenGL::DoRenderPass`
+(el punto que hace `glDrawArrays` ~1197 veces/frame) hace early-return en frames omitidos; decisión
+latcheada al final de `FlipImpl`. Presentación-only: no toca EE RAM.
+
+| | base (n=0) | **frameskip n=2** |
+|---|---|---|
+| emuSpeedPct | 13.3% | **53.3%** (≈4x) |
+| fps (frames emulados/s) | 8.0 | **31.9** |
+| gsStallMsS | 763 | 557 |
+| gsBusyMsS | 1000 | **997 (GS SIGUE saturado)** |
+| drawCalls/f | 1197 | 388 (1 de 3 dibuja) |
+| eeIdlePct | 87.1 | 82.2 |
+
+**Objetivo del plan (30 fps ≈ 50%) ALCANZADO: 53% de velocidad de emulación.** GS-bound reconfirmado
+(saltar draws cuadruplicó la velocidad). **Gate OK: cube golden intacto** (harness verde; el rojo del
+primer run fue flaky de setup, no el golden — el frameskip es default-off y el harness del cube nunca
+lo activa). Caveat honesto: `gsBusy` sigue ~997 incluso con n=2 → el GS sigue siendo el muro; el
+frameskip cambia frames dibujados por velocidad (render ~10 fps visual), no reduce el coste del GS.
+
+## 10. Siguiente — FASE 1C paso 2 (mantiene render completo)
+
+Reducir el coste real del GS para velocidad Y render full: (a) arreglar warnings por-frame
+`No texture bound` / `Invalid enum TEXTURE_SWIZZLE_R`; (b) cache de estado GL más agresivo en
+`DoRenderPass` (bind/texParameter redundantes); (c) **batch de draw calls** (bajar de ~1197/f). Si
+1C.2 no basta → WebGPU (F4). Pendiente además: muestra n=3 para el techo del frameskip.

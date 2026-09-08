@@ -106,3 +106,20 @@ Reducir el coste real del GS para velocidad Y render full: (a) arreglar warnings
 `No texture bound` / `Invalid enum TEXTURE_SWIZZLE_R`; (b) cache de estado GL más agresivo en
 `DoRenderPass` (bind/texParameter redundantes); (c) **batch de draw calls** (bajar de ~1197/f). Si
 1C.2 no basta → WebGPU (F4). Pendiente además: muestra n=3 para el techo del frameskip.
+
+## 11. FASE 1C.2 — BISECT setGsDiag (2026-09-08, Chrome/M2, combate Goku vs Raditz)
+
+| modo | emuSpeed | fps | draws/f | gsBusy ms/s | gsStall ms/s |
+|---|---|---|---|---|---|
+| 0 normal | 54,1 % | 32,4 | 1051 | 861 | 319 |
+| 1 sin glDrawArrays | 54,8 % | 32,8 | 1126 | 942 | 414 |
+| 2 sin render pass | 61,7 % | 37,0 | 0 | 913 | 300 |
+
+**Veredicto:** rasterizar ≈ 0; el render pass entero ≈ 7 puntos. El hilo GS sigue ~90 % ocupado sin
+dibujar → el coste está FUERA de `DoRenderPass` (registros/kicks, `ProcessHostToLocalTransfer`,
+`FlipImpl` o el proxy GL al hilo principal: el contexto se crea en main y el GS lo usa desde su pthread
+con `-sOFFSCREEN_FRAMEBUFFER=1`). **Ni WebGPU (F4) ni batching de draws (1C.3) son la siguiente
+inversión.** Además hay un techo ~65 % con GS y EE casi parados (pantalla de resultados: 25 draws/f,
+gsBusy 105, eeIdle 96 %, speed 64,5 %) → sospecha I/O CDVD desde OPFS / pacing del EmuThread / IOP-SPU2.
+Nota: base en Chrome/M2 = 47–54 % con render completo (las medidas de julio, 13 %, eran Firefox).
+Plan de pruebas y siguientes métricas (`setGsDiag(3/4)`, cdvd/iop/sleep): `docs/QA-PLAN.md`.

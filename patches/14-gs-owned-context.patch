@@ -1,0 +1,458 @@
+diff --git a/Source/MailBox.cpp b/Source/MailBox.cpp
+index b9c9498b..4e7104a6 100644
+--- a/Source/MailBox.cpp
++++ b/Source/MailBox.cpp
+@@ -45,6 +45,9 @@ void CMailBox::SendCall(const FunctionType& function, bool waitForCompletion)
+ 	}
+ 
+ 	m_waitCondition.notify_all();
++#if defined(__EMSCRIPTEN__)
++	if(m_kick) m_kick(); // PS2WEB(14): push happened, wake the event-loop receiver BEFORE waiting
++#endif
+ 
+ 	if(waitForCompletion)
+ 	{
+@@ -63,6 +66,9 @@ void CMailBox::SendCall(FunctionType&& function)
+ 	}
+ 
+ 	m_waitCondition.notify_all();
++#if defined(__EMSCRIPTEN__)
++	if(m_kick) m_kick(); // PS2WEB(14)
++#endif
+ }
+ 
+ void CMailBox::ReceiveCall()
+diff --git a/Source/MailBox.h b/Source/MailBox.h
+index 7c2057f0..f0b79ebe 100644
+--- a/Source/MailBox.h
++++ b/Source/MailBox.h
+@@ -21,6 +21,11 @@ public:
+ 	void ReceiveCall();
+ 	void WaitForCall();
+ 	void WaitForCall(unsigned int);
++#if defined(__EMSCRIPTEN__)
++	// PS2WEB(14): invoked after every push (before any wait). Lets a receiver that lives in a JS
++	// event loop (the GS pthread) be woken without a blocking WaitForCall.
++	void SetKick(std::function<void()> kick) { m_kick = std::move(kick); }
++#endif
+ 
+ private:
+ 	struct MESSAGE
+@@ -42,4 +47,7 @@ private:
+ 	FunctionCallQueue m_calls;
+ 	std::mutex m_callMutex;
+ 	std::condition_variable m_waitCondition;
++#if defined(__EMSCRIPTEN__)
++	std::function<void()> m_kick;
++#endif
+ };
+diff --git a/Source/PS2VM.cpp b/Source/PS2VM.cpp
+index 7e96de6f..f7d63970 100644
+--- a/Source/PS2VM.cpp
++++ b/Source/PS2VM.cpp
+@@ -12,6 +12,16 @@ extern std::atomic<uint64_t> g_ps2webVuExecNs;
+ #include "make_unique.h"
+ #include "string_format.h"
+ #include "PS2VM.h"
++#if defined(__EMSCRIPTEN__)
++#include <emscripten/threading.h>
++#include <pthread.h>
++int g_ps2webGsOwnsContext = 1; // PS2WEB(14): set from initVm before threads exist (?gsproxy=1 -> 0)
++void* CPS2VM::Ps2webEeThreadEntry(void* p)
++{
++	static_cast<CPS2VM*>(p)->EmuThread();
++	return nullptr;
++}
++#endif
+ #include "PS2VM_Preferences.h"
+ #include "ee/PS2OS.h"
+ #include "ee/EeExecutor.h"
+@@ -329,6 +339,20 @@ void CPS2VM::Reset(uint32 eeRamSize, uint32 iopRamSize)
+ void CPS2VM::Initialize()
+ {
+ 	m_nEnd = false;
++#if defined(__EMSCRIPTEN__)
++	if(g_ps2webGsOwnsContext)
++	{
++		// PS2WEB(14): transfer the canvas main -> EE thread. The GS handler is constructed ON the EE
++		// thread (CreateGsHandlerImpl), which then relays the OffscreenCanvas to the GS pthread.
++		pthread_attr_t attr;
++		pthread_attr_init(&attr);
++		emscripten_pthread_attr_settransferredcanvases(&attr, "#outputCanvas");
++		int rc = pthread_create(&m_ps2webEeThread, &attr, &CPS2VM::Ps2webEeThreadEntry, this);
++		pthread_attr_destroy(&attr);
++		assert(rc == 0);
++		return;
++	}
++#endif
+ 	m_thread = std::thread([&]() { EmuThread(); });
+ 	Framework::ThreadUtils::SetThreadName(m_thread, THREAD_NAME);
+ }
+@@ -336,6 +360,13 @@ void CPS2VM::Initialize()
+ void CPS2VM::Destroy()
+ {
+ 	m_mailBox.SendCall(std::bind(&CPS2VM::DestroyImpl, this));
++#if defined(__EMSCRIPTEN__)
++	if(g_ps2webGsOwnsContext)
++	{
++		pthread_join(m_ps2webEeThread, nullptr);
++	}
++	else
++#endif
+ 	m_thread.join();
+ 	DestroyVM();
+ }
+@@ -470,6 +501,9 @@ void CPS2VM::ValidateThreadContext()
+ {
+ 	FRAMEWORK_MAYBE_UNUSED auto currThreadId = std::this_thread::get_id();
+ 	FRAMEWORK_MAYBE_UNUSED auto vmThreadId = m_thread.get_id();
++#if defined(__EMSCRIPTEN__)
++	if(g_ps2webGsOwnsContext) return; // PS2WEB(14): EE runs on a raw pthread, m_thread is unused
++#endif
+ 	assert(vmThreadId == std::thread::id() || currThreadId == vmThreadId);
+ }
+ 
+diff --git a/Source/PS2VM.h b/Source/PS2VM.h
+index c4f8be0c..c355d44e 100644
+--- a/Source/PS2VM.h
++++ b/Source/PS2VM.h
+@@ -129,7 +129,9 @@ private:
+ 	void PauseImpl();
+ 	void DestroyImpl();
+ 
+-	void CreateGsHandlerImpl(const CGSHandler::FactoryFunction&);
++public:
++	void CreateGsHandlerImpl(const CGSHandler::FactoryFunction&); // PS2WEB(14): called from CPs2VmJs on the EE thread
++private:
+ 	void DestroyGsHandlerImpl();
+ 
+ 	void CreatePadHandlerImpl(const CPadHandler::FactoryFunction&);
+@@ -151,6 +153,11 @@ private:
+ 	void EmuThread();
+ 
+ 	std::thread m_thread;
++#if defined(__EMSCRIPTEN__)
++#include <pthread.h>
++	pthread_t m_ps2webEeThread = 0; // PS2WEB(14)
++	static void* Ps2webEeThreadEntry(void*);
++#endif
+ 	STATUS m_nStatus = PAUSED;
+ 	bool m_nEnd = false;
+ 
+diff --git a/Source/gs/GSHandler.cpp b/Source/gs/GSHandler.cpp
+index 88f6ac49..2a990ee5 100644
+--- a/Source/gs/GSHandler.cpp
++++ b/Source/gs/GSHandler.cpp
+@@ -8,6 +8,13 @@
+ #include "../FrameDump.h"
+ #include "../ee/INTC.h"
+ #include "GSHandler.h"
++#if defined(__EMSCRIPTEN__)
++#include <emscripten/threading.h>
++#include <emscripten/proxying.h>
++#include <emscripten/eventloop.h>
++#include <pthread.h>
++extern int g_ps2webGsOwnsContext; // PS2WEB(14): 1 = GS pthread owns the WebGL context (default)
++#endif
+ #include "GsPixelFormats.h"
+ #include "string_format.h"
+ #include "ThreadUtils.h"
+@@ -110,6 +117,22 @@ CGSHandler::CGSHandler(bool gsThreaded)
+ 
+ 	if(m_gsThreaded)
+ 	{
++#if defined(__EMSCRIPTEN__)
++		if(g_ps2webGsOwnsContext)
++		{
++			// PS2WEB(14): create the GS pthread with the canvas transferred to it. We are on the EE
++			// thread here, which received the canvas from the main thread (see CPS2VM::Initialize);
++			// inside a pthread emscripten looks the canvas up by DOM id WITHOUT the '#' prefix.
++			m_mailBox.SetKick([this]() { Ps2webKick(); });
++			pthread_attr_t attr;
++			pthread_attr_init(&attr);
++			emscripten_pthread_attr_settransferredcanvases(&attr, "outputCanvas");
++			int rc = pthread_create(&m_ps2webGsThread, &attr, &CGSHandler::Ps2webThreadEntry, this);
++			pthread_attr_destroy(&attr);
++			assert(rc == 0);
++			return;
++		}
++#endif
+ 		m_thread = std::thread([&]() { ThreadProc(); });
+ 		Framework::ThreadUtils::SetThreadName(m_thread, "GS Thread");
+ 	}
+@@ -120,6 +143,13 @@ CGSHandler::~CGSHandler()
+ 	if(m_gsThreaded)
+ 	{
+ 		SendGSCall([this]() { m_threadDone = true; });
++#if defined(__EMSCRIPTEN__)
++		if(g_ps2webGsOwnsContext)
++		{
++			pthread_join(m_ps2webGsThread, nullptr);
++		}
++		else
++#endif
+ 		m_thread.join();
+ 	}
+ 	delete[] m_pRAM;
+@@ -2177,6 +2207,77 @@ void CGSHandler::WriteToDelayedRegister(uint32 address, uint32 value, DELAYED_RE
+ 	}
+ }
+ 
++#if defined(__EMSCRIPTEN__)
++// PS2WEB(14): GS as an event-loop thread.
++//   Why: with -sOFFSCREEN_FRAMEBUFFER the WebGL context lived on the main thread and EVERY GL call
++//   from the GS pthread was proxied there (glTexImage2D/glTexSubImage2D >= 256KB, glGenTextures,
++//   glDeleteTextures, glReadPixels are SYNCHRONOUS round-trips; the rest allocate+post). The bisect
++//   in docs/PROFILE-DBZ.md §11 showed the GS thread ~90% busy even with zero draws — that was this.
++//   Now the GS pthread owns the OffscreenCanvas and calls WebGL directly. The catch: OffscreenCanvas
++//   only presents a frame when the worker returns to its JS event loop, so the blocking
++//   WaitForCall loop is replaced by: EE pushes -> Ps2webKick (at most one pending kick) ->
++//   Ps2webDrain runs as a task in the GS worker, processes messages until the queue is empty OR a
++//   flip happened (then yields so the browser can present), and re-schedules itself if needed.
++void* CGSHandler::Ps2webThreadEntry(void* p)
++{
++	auto self = static_cast<CGSHandler*>(p);
++	self->m_ps2webThreadStarted.store(true);
++	self->Ps2webDrain(); // anything queued before the (async) thread start
++	// Keep the worker alive in its JS event loop; work arrives via Ps2webDrainThunk. NOTE: plain
++	// emscripten_unwind_to_js_event_loop() is NOT enough for a pthread (its runtime-keepalive
++	// counter is 0 -> the thread exits right after unwinding); this one bumps the counter first.
++	emscripten_exit_with_live_runtime();
++	return nullptr;
++}
++
++void CGSHandler::Ps2webDrainThunk(void* p)
++{
++	static_cast<CGSHandler*>(p)->Ps2webDrain();
++}
++
++void CGSHandler::Ps2webDrain()
++{
++	auto _ps2webGsB0 = std::chrono::steady_clock::now();
++	m_flipped = false;
++	while(m_mailBox.IsPending())
++	{
++		m_mailBox.ReceiveCall();
++		if(m_flipped) break; // yield: let the browser present this frame
++	}
++	g_ps2webGsBusyNs += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - _ps2webGsB0).count();
++	m_ps2webKickPending.store(false);
++	if(m_threadDone)
++	{
++		pthread_exit(nullptr);
++	}
++	if(m_mailBox.IsPending())
++	{
++		// More work already queued: continue on the next event-loop turn. Self-proxy through the
++		// mailbox (Atomics.waitAsync-notified): emscripten_set_immediate() is NOT usable here, its
++		// worker polyfill does postMessage(id, "*") which throws in a DedicatedWorkerGlobalScope,
++		// and emscripten_set_timeout(0) hits the browser's 4ms nested-timer clamp.
++		if(!m_ps2webKickPending.exchange(true))
++		{
++			emscripten_proxy_async(emscripten_proxy_get_system_queue(), pthread_self(), &CGSHandler::Ps2webDrainThunk, this);
++		}
++	}
++}
++
++void CGSHandler::Ps2webKick()
++{
++	// Called on the SENDER thread after a push. One outstanding kick is enough: the drain re-checks
++	// the queue after clearing the flag, so a push that lands during a drain is never lost.
++	if(m_ps2webKickPending.exchange(true)) return;
++	if(!m_ps2webThreadStarted.load())
++	{
++		// Thread not running yet: its entry drains the queue on start. Leave the flag set so we
++		// don't spam proxied calls at a mailbox that isn't being serviced; the entry drain clears it.
++		return;
++	}
++	emscripten_proxy_async(emscripten_proxy_get_system_queue(), m_ps2webGsThread, &CGSHandler::Ps2webDrainThunk, this);
++}
++#endif
++
+ void CGSHandler::ThreadProc()
+ {
+ 	while(!m_threadDone)
+diff --git a/Source/gs/GSHandler.h b/Source/gs/GSHandler.h
+index 66bfe59a..159713bf 100644
+--- a/Source/gs/GSHandler.h
++++ b/Source/gs/GSHandler.h
+@@ -1123,6 +1123,17 @@ protected:
+ 
+ 	CRT_MODE m_crtMode;
+ 	std::thread m_thread;
++#if defined(__EMSCRIPTEN__)
++	// PS2WEB(14): GS runs as a pthread that owns the OffscreenCanvas and lives in its worker's JS
++	// event loop (needed: OffscreenCanvas frames are only presented when the worker yields).
++	pthread_t m_ps2webGsThread = 0;
++	std::atomic<bool> m_ps2webKickPending{false};
++	std::atomic<bool> m_ps2webThreadStarted{false};
++	void Ps2webDrain();
++	void Ps2webKick();
++	static void Ps2webDrainThunk(void*);
++	static void* Ps2webThreadEntry(void*);
++#endif
+ 	std::recursive_mutex m_registerMutex;
+ #ifdef _DEBUG
+ 	std::atomic<int> m_transferCount;
+diff --git a/Source/ui_js/GSH_OpenGLJs.cpp b/Source/ui_js/GSH_OpenGLJs.cpp
+index 5c98e964..b395d07b 100644
+--- a/Source/ui_js/GSH_OpenGLJs.cpp
++++ b/Source/ui_js/GSH_OpenGLJs.cpp
+@@ -1,4 +1,7 @@
+ #include "GSH_OpenGLJs.h"
++#include <emscripten/html5.h>
++#include <cstdio>
++#include <cassert>
+ 
+ CGSH_OpenGLJs::CGSH_OpenGLJs(EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context)
+     : m_context(context)
+@@ -12,6 +15,20 @@ CGSH_OpenGL::FactoryFunction CGSH_OpenGLJs::GetFactoryFunction(EMSCRIPTEN_WEBGL_
+ 
+ void CGSH_OpenGLJs::InitializeImpl()
+ {
++	if(m_context == 0)
++	{
++		// PS2WEB(14): we run on the GS pthread that owns the OffscreenCanvas -> create the WebGL
++		// context HERE. From now on every gl* call is a direct call (no main-thread proxying).
++		EmscriptenWebGLContextAttributes attr;
++		emscripten_webgl_init_context_attributes(&attr);
++		attr.majorVersion = 2;
++		attr.minorVersion = 0;
++		attr.alpha = false;
++		attr.proxyContextToMainThread = EMSCRIPTEN_WEBGL_CONTEXT_PROXY_DISALLOW;
++		m_context = emscripten_webgl_create_context("#outputCanvas", &attr);
++		printf("PS2WEB(14): GS-owned WebGL context = %d\r\n", (int)m_context);
++		assert(m_context > 0);
++	}
+ 	emscripten_webgl_make_context_current(m_context);
+ 	CGSH_OpenGL::InitializeImpl();
+ }
+diff --git a/Source/ui_js/Main.cpp b/Source/ui_js/Main.cpp
+index 20275ad7..614d05e2 100644
+--- a/Source/ui_js/Main.cpp
++++ b/Source/ui_js/Main.cpp
+@@ -3,6 +3,9 @@
+ #include <unordered_map>
+ #include <mutex>
+ #include <emscripten/bind.h>
++#include <emscripten/emscripten.h>
++#include <emscripten/threading.h>
++#include <atomic>
+ #include "Ps2VmJs.h"
+ #include "GSH_OpenGLJs.h"
+ #include "sound/SH_OpenAL/SH_OpenALProxy.h"
+@@ -49,20 +52,55 @@ EM_BOOL keyboardCallback(int eventType, const EmscriptenKeyboardEvent* keyEvent,
+ 	return true;
+ }
+ 
++extern int g_ps2webGsOwnsContext; // PS2WEB(14), defined in PS2VM.cpp
++static std::atomic<int> g_ps2webVmReady{0};
++extern "C" void initVmPhase2();
+ extern "C" void initVm()
+ {
+-	EmscriptenWebGLContextAttributes attr;
+-	emscripten_webgl_init_context_attributes(&attr);
+-	attr.majorVersion = 2;
+-	attr.minorVersion = 0;
+-	attr.alpha = false;
+-	g_context = emscripten_webgl_create_context("#outputCanvas", &attr);
+-	assert(g_context >= 0);
++	// PS2WEB(14): default = GS pthread owns the canvas/context. Escape hatch for A/B on the same
++	// build: load the page with ?gsproxy=1 to get the old main-thread-proxied context.
++	g_ps2webGsOwnsContext = EM_ASM_INT({
++		try { if (/[?&]gsproxy=1/.test(location.search)) return 0; } catch(e) {}
++		return (typeof OffscreenCanvas === "function") ? 1 : 0;
++	});
++	printf("PS2WEB(14): gsOwnsContext=%d\r\n", g_ps2webGsOwnsContext);
++	if(!g_ps2webGsOwnsContext)
++	{
++		EmscriptenWebGLContextAttributes attr;
++		emscripten_webgl_init_context_attributes(&attr);
++		attr.majorVersion = 2;
++		attr.minorVersion = 0;
++		attr.alpha = false;
++		g_context = emscripten_webgl_create_context("#outputCanvas", &attr);
++		assert(g_context >= 0);
++	}
+ 
+ 	g_virtualMachine = new CPs2VmJs();
+ 	g_virtualMachine->Initialize();
++	if(g_ps2webGsOwnsContext)
++	{
++		// PS2WEB(14): the GS pthread is spawned FROM the EE thread with the canvas attached, which
++		// emscripten can only do asynchronously via a postMessage to the main thread. If main blocked
++		// here (CreateGSHandler waits on the EE mailbox) that message would never be serviced ->
++		// deadlock (seen: page never reaches __ps2web.ready). So: queue the creation WITHOUT waiting,
++		// return to the JS event loop, and finish the setup in initVmPhase2 once the GS is up.
++		// JS polls getVmInitState() before touching the module.
++		// NOTE: phase 2 blocks the main thread (CreatePadHandler waits on the EE mailbox). It must
++		// NOT run inside a proxied task: while a proxied task executes, the main-thread futex spin
++		// refuses to service further proxied calls (recursion guard), so the EE's next proxied
++		// syscall (any printf/fd op) would deadlock against it. So the EE only flips a flag and JS
++		// calls initVmPhase2() from its own event loop (see PlayModule.ts).
++		g_virtualMachine->Ps2webCreateGSHandlerAsync(CGSH_OpenGLJs::GetFactoryFunction(0), []() {
++			g_ps2webVmReady.store(1); // 1 = GS up, phase 2 pending
++		});
++		return;
++	}
+ 	g_virtualMachine->CreateGSHandler(CGSH_OpenGLJs::GetFactoryFunction(g_context));
++	initVmPhase2();
++}
+ 
++extern "C" void initVmPhase2()
++{
+ 	{
+ 		//Size here needs to match the size of the canvas in HTML file.
+ 
+@@ -135,8 +173,13 @@ extern "C" void initVm()
+ 
+ 	result = emscripten_set_keyup_callback("#outputCanvas", nullptr, false, &keyboardCallback);
+ 	assert(result == EMSCRIPTEN_RESULT_SUCCESS);
++	g_ps2webVmReady.store(2);
++	printf("PS2WEB(14): VM ready (phase 2 done)\r\n");
+ }
+ 
++// 0 = waiting for the GS thread, 1 = GS up (JS must call initVmPhase2), 2 = ready.
++int getVmInitState() { return g_ps2webVmReady.load(); }
++
+ void bootElf(std::string path)
+ {
+ 	g_virtualMachine->BootElf(path);
+@@ -263,6 +306,7 @@ EMSCRIPTEN_BINDINGS(Play)
+ 	function("bootDiscImage", &bootDiscImage);
+ 	function("getFrames", &getFrames);
+ 	function("clearStats", &clearStats);
++	function("getVmInitState", &getVmInitState); // PS2WEB(14)
+ 	function("getJitMs", &getJitMs);
+ 	function("getJitBlocks", &getJitBlocks);
+ 	function("getDispatches", &getDispatches);
+diff --git a/Source/ui_js/Ps2VmJs.cpp b/Source/ui_js/Ps2VmJs.cpp
+index b779dbe8..225d44b1 100644
+--- a/Source/ui_js/Ps2VmJs.cpp
++++ b/Source/ui_js/Ps2VmJs.cpp
+@@ -44,6 +44,14 @@ void CPs2VmJs::CreateVM()
+ 	CPS2VM::CreateVM();
+ }
+ 
++void CPs2VmJs::Ps2webCreateGSHandlerAsync(const CGSHandler::FactoryFunction& factoryFunction, std::function<void()> onDone)
++{
++	m_mailBox.SendCall([this, factoryFunction, onDone]() {
++		CreateGsHandlerImpl(factoryFunction);
++		onDone();
++	});
++}
++
+ void CPs2VmJs::BootElf(std::string path)
+ {
+ 	m_mailBox.SendCall([this, path]() {
+diff --git a/Source/ui_js/Ps2VmJs.h b/Source/ui_js/Ps2VmJs.h
+index 4484d5d1..a0505242 100644
+--- a/Source/ui_js/Ps2VmJs.h
++++ b/Source/ui_js/Ps2VmJs.h
+@@ -9,4 +9,6 @@ public:
+ 
+ 	void BootElf(std::string);
+ 	void BootDiscImage(std::string);
++	// PS2WEB(14): non-blocking GS creation; onDone runs on the EE thread after the GS is initialized.
++	void Ps2webCreateGSHandlerAsync(const CGSHandler::FactoryFunction&, std::function<void()> onDone);
+ };

@@ -18,9 +18,19 @@ if ! grep -q 'MAXIMUM_MEMORY' "$f"; then
   sed -i 's#target_link_options(Play PRIVATE "-sALLOW_MEMORY_GROWTH")#target_link_options(Play PRIVATE "-sALLOW_MEMORY_GROWTH")\ntarget_link_options(Play PRIVATE "-sMAXIMUM_MEMORY=2147483648")#' "$f"
 fi
 
+# PS2WEB(14): the GS pthread owns the canvas (OffscreenCanvas) and creates its own WebGL context
+# -> no main-thread GL proxying. Two-phase init needs _initVmPhase2 exported. Lives here (not in
+# patches/14) because git apply --index refuses a file the flags step already modified.
+if ! grep -q 'OFFSCREENCANVAS_SUPPORT' "$f"; then
+  sed -i 's#target_link_options(Play PRIVATE "-sOFFSCREEN_FRAMEBUFFER=1")#target_link_options(Play PRIVATE "-sOFFSCREEN_FRAMEBUFFER=1")\ntarget_link_options(Play PRIVATE "-sOFFSCREENCANVAS_SUPPORT=1")#' "$f"
+fi
+sed -i "s/'_main', '_initVm', '_EmptyBlockHandler'/'_main', '_initVm', '_initVmPhase2', '_EmptyBlockHandler'/" "$f"
+
 grep -q -- '-sPTHREAD_POOL_SIZE=8'   "$f" || { echo "FAIL: pool size not applied"; exit 1; }
+grep -q -- '-sOFFSCREENCANVAS_SUPPORT=1' "$f" || { echo "FAIL: offscreencanvas not applied (patch 14)"; exit 1; }
+grep -q -- "'_initVmPhase2'" "$f" || { echo "FAIL: _initVmPhase2 export missing (patch 14)"; exit 1; }
 grep -q -- '-sALLOW_MEMORY_GROWTH'   "$f" || { echo "FAIL: memory growth missing (needed for real games)"; exit 1; }
 grep -q -- '-sMAXIMUM_MEMORY=2147483648' "$f" || { echo "FAIL: maximum memory not applied"; exit 1; }
 grep -q -- '-sALLOW_TABLE_GROWTH'    "$f" || { echo "FAIL: table growth (JIT) missing!"; exit 1; }
 
-echo "F2 flags OK (D5 revisado = growth + 2GB max):"; grep -nE 'PTHREAD_POOL_SIZE|ALLOW_MEMORY_GROWTH|MAXIMUM_MEMORY|ALLOW_TABLE_GROWTH' "$f"
+echo "F2 flags OK (D5 revisado = growth + 2GB max):"; grep -nE 'PTHREAD_POOL_SIZE|ALLOW_MEMORY_GROWTH|MAXIMUM_MEMORY|ALLOW_TABLE_GROWTH|OFFSCREENCANVAS|_initVmPhase2' "$f"

@@ -1,0 +1,531 @@
+diff --git a/Source/BasicBlock.cpp b/Source/BasicBlock.cpp
+index fec4dc33..cf283ebb 100644
+--- a/Source/BasicBlock.cpp
++++ b/Source/BasicBlock.cpp
+@@ -41,6 +41,12 @@ std::atomic<uint32_t> g_ps2webStaleReverts{0};    // PS2WEB(JIT-04 v2)
+ //   vuBlocks  : VU blocks compiled fresh (== VU modules; the VU never goes through the region batcher).
+ std::atomic<uint64_t> g_ps2webEeExecNs{0};
+ std::atomic<uint64_t> g_ps2webVuExecNs{0};
++// PS2WEB(15): host-time split of the EE thread beyond EE/VU (IOP, SPU, frame limiter, disc I/O).
++std::atomic<uint64_t> g_ps2webIopExecNs{0};
++std::atomic<uint64_t> g_ps2webSpuNs{0};
++std::atomic<uint64_t> g_ps2webLimiterNs{0};
++std::atomic<uint64_t> g_ps2webDiscNs{0};
++std::atomic<uint64_t> g_ps2webDiscReads{0};
+ std::atomic<uint64_t> g_ps2webGsBusyNs{0};
+ std::atomic<uint64_t> g_ps2webGsWaitNs{0};
+ std::atomic<uint64_t> g_ps2webGsStallNs{0};
+diff --git a/Source/FrameLimiter.cpp b/Source/FrameLimiter.cpp
+index 0d050fa3..05d12ce8 100644
+--- a/Source/FrameLimiter.cpp
++++ b/Source/FrameLimiter.cpp
+@@ -1,6 +1,19 @@
+ #include "FrameLimiter.h"
+ #include <cassert>
+ #include <thread>
++#if defined(__EMSCRIPTEN__)
++int g_ps2webLimiterMode = 1; // PS2WEB(15): 0 = upstream sleep-after-work, 1 = absolute deadline (default)
++#include <atomic>
++extern std::atomic<uint64_t> g_ps2webLimiterNs; // PS2WEB(15): host time spent in EndFrame (sleep + spin)
++namespace
++{
++	struct Ps2webLimTimer
++	{
++		std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
++		~Ps2webLimTimer() { g_ps2webLimiterNs += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count(); }
++	};
++}
++#endif
+ 
+ CFrameLimiter::CFrameLimiter()
+ {
+@@ -32,6 +45,63 @@ void CFrameLimiter::BeginFrame()
+ void CFrameLimiter::EndFrame()
+ {
+ 	assert(m_frameStarted);
++#if defined(__EMSCRIPTEN__)
++	Ps2webLimTimer _ps2webLimTimer;
++	// PS2WEB(15): runtime A/B: setLimiterMode(0) = upstream algorithm below, 1 (default) = absolute deadline.
++	if(g_ps2webLimiterMode != 0)
++	// PS2WEB(15): the upstream algorithm sleeps (target - avg work time) AFTER the work, in 250us
++	// slices, and never looks at how long the sleep actually took. In a browser worker a timed
++	// futex wait wakes late (scheduling + timer granularity), and that lateness is never paid back:
++	// measured on DBZ BT3 at an idle screen, 8 ms of work + a 12 ms sleep took 35 ms per frame
++	// (limiterMsS ~600 ms/s at 25 fps; with the limiter off the same screen ran at 50-60 fps).
++	// Replace it with an absolute schedule: each frame's deadline is previous + 1/fps, a late wake
++	// just shortens the next wait. Sleep coarsely until ~1.5 ms before the deadline, then spin.
++	{
++		auto now = std::chrono::high_resolution_clock::now();
++		if(m_minFrameDuration.count() == 0)
++		{
++			m_frameStarted = false;
++			return;
++		}
++		if(!m_ps2webDeadlineValid || (now > (m_ps2webDeadline + m_minFrameDuration * 2)))
++		{
++			// First frame, or we are more than two frames behind (loading, JIT warmup): resync
++			// instead of trying to catch up with a burst.
++			m_ps2webDeadline = now;
++			m_ps2webDeadlineValid = true;
++		}
++		m_ps2webDeadline += m_minFrameDuration;
++		// A timed wait in a worker can wake far later than asked (measured up to ~20 ms late on a
++		// loaded 4-vCPU box). Learn the overshoot (EMA) and stop sleeping that early; spin the
++		// remainder. Spin is capped at SPIN_MAX so a pathological host can't turn the limiter
++		// into a 100% busy loop.
++		static double s_overshootMs = 1.0;
++		static const auto SPIN_MAX = std::chrono::microseconds(8000);
++		static const auto SPIN_MIN = std::chrono::microseconds(500);
++		while(now < m_ps2webDeadline)
++		{
++			auto remaining = std::chrono::duration_cast<std::chrono::microseconds>(m_ps2webDeadline - now);
++			auto margin = std::chrono::microseconds(static_cast<int64_t>(s_overshootMs * 1500.0 + 500.0));
++			if(margin > SPIN_MAX) margin = SPIN_MAX;
++			if(margin < SPIN_MIN) margin = SPIN_MIN;
++			if(remaining > margin)
++			{
++				auto want = remaining - margin;
++				std::this_thread::sleep_for(want);
++				auto after = std::chrono::high_resolution_clock::now();
++				double actualMs = std::chrono::duration_cast<std::chrono::microseconds>(after - now).count() / 1000.0;
++				double overshoot = actualMs - (want.count() / 1000.0);
++				if(overshoot < 0) overshoot = 0;
++				s_overshootMs = s_overshootMs * 0.8 + overshoot * 0.2;
++				now = after;
++				continue;
++			}
++			now = std::chrono::high_resolution_clock::now();
++		}
++		m_frameStarted = false;
++		return;
++	}
++#endif
+ 
+ 	//Add current frame time to array
+ 	{
+diff --git a/Source/FrameLimiter.h b/Source/FrameLimiter.h
+index 36e8b935..20e3747b 100644
+--- a/Source/FrameLimiter.h
++++ b/Source/FrameLimiter.h
+@@ -32,6 +32,11 @@ private:
+ 	std::chrono::microseconds m_minFrameDuration = std::chrono::microseconds(0);
+ 	bool m_frameStarted = false;
+ 	TimePoint m_lastFrameTime;
++#if defined(__EMSCRIPTEN__)
++	// PS2WEB(15): absolute-deadline pacing (see FrameLimiter.cpp).
++	TimePoint m_ps2webDeadline;
++	bool m_ps2webDeadlineValid = false;
++#endif
+ 
+ #ifdef _WIN32
+ 	HANDLE m_timer = 0;
+diff --git a/Source/GenericMipsExecutor.h b/Source/GenericMipsExecutor.h
+index 43825ae4..fab8c0c1 100644
+--- a/Source/GenericMipsExecutor.h
++++ b/Source/GenericMipsExecutor.h
+@@ -1,4 +1,8 @@
+ #pragma once
++#ifdef __EMSCRIPTEN__
++#include <chrono>
++#include <atomic>
++#endif
+ 
+ #include <unordered_set>
+ #include "MIPS.h"
+@@ -78,9 +82,18 @@ public:
+ 	}
+ 
+ 	virtual ~CGenericMipsExecutor() = default;
++#ifdef __EMSCRIPTEN__
++	std::atomic<uint64_t>* m_ps2webExecNs = nullptr; // PS2WEB(15)
++#endif
+ 
+ 	int Execute(int cycles) override
+ 	{
++#ifdef __EMSCRIPTEN__
++		// PS2WEB(15): optional host-time accounting for this executor (set for the IOP from Main.cpp;
++		// the EE is timed in CPS2VM::UpdateEe). steady_clock read only when armed.
++		std::chrono::steady_clock::time_point _ps2webT0;
++		if(m_ps2webExecNs) _ps2webT0 = std::chrono::steady_clock::now();
++#endif
+ 		m_context.m_State.cycleQuota = cycles;
+ #ifdef DEBUGGER_INCLUDED
+ 		m_mustBreak = false;
+@@ -97,6 +110,9 @@ public:
+ 			g_ps2webDispatches.fetch_add(1, std::memory_order_relaxed); // PS2WEB(F3)
+ 		}
+ 		m_context.m_State.nHasException &= ~MIPS_EXCEPTION_STATUS_QUOTADONE;
++#ifdef __EMSCRIPTEN__
++		if(m_ps2webExecNs) *m_ps2webExecNs += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - _ps2webT0).count();
++#endif
+ #ifdef DEBUGGER_INCLUDED
+ 		if(m_context.m_State.nHasException == MIPS_EXCEPTION_BREAKPOINT)
+ 		{
+diff --git a/Source/Js_DiscImageDeviceStream.cpp b/Source/Js_DiscImageDeviceStream.cpp
+index 71d60516..0867702a 100644
+--- a/Source/Js_DiscImageDeviceStream.cpp
++++ b/Source/Js_DiscImageDeviceStream.cpp
+@@ -1,8 +1,110 @@
+ #include "Js_DiscImageDeviceStream.h"
+ #include <stdexcept>
+ #include <cassert>
++#include <cstring>
++#include <algorithm>
+ #include <emscripten.h>
++#include <emscripten/threading.h>
+ #include <unistd.h>
++#include <errno.h>
++#include <limits>
++#include <atomic>
++#include <chrono>
++extern std::atomic<uint64_t> g_ps2webDiscNs;    // PS2WEB(15): time the EE spends inside disc reads
++extern std::atomic<uint64_t> g_ps2webDiscReads; // PS2WEB(15): reads that left wasm (worker or main)
++
++// PS2WEB(15): disc reads without the main thread.
++//
++// Upstream path (kept below as LegacyRead): each read did MAIN_THREAD_EM_ASM to kick off
++// file.slice().arrayBuffer() on the main thread and then polled isDone() — every poll another
++// synchronous proxied call — with usleep(100) in between. With ~1 read per 2 KB sector and a main
++// thread busy with the UI, a streaming game spends most of its time here; it shows up as "EE idle"
++// (docs/QA-PLAN.md §2.2: 65% speed with GS and EE both nearly idle).
++//
++// New path: DiscImageDevice.ts spins up an IO worker holding the File + a FileReaderSync and
++// hands us a control block inside wasm memory. A read is: fill the request, state=1, futex wake,
++// futex wait until state=2. No main-thread involvement at all. On top, a read-ahead cache of
++// PS2WEB_DISC_CHUNK bytes turns sequential sector reads into memcpy.
++// A/B on the same build: ?discproxy=1 forces the legacy path (DiscImageDevice.ts).
++
++static const uint64 PS2WEB_DISC_CHUNK = 256 * 1024;
++
++enum
++{
++	CTRL_STATE = 0,
++	CTRL_OFF_LO = 1,
++	CTRL_OFF_HI = 2,
++	CTRL_SIZE = 3,
++	CTRL_DST = 4,
++	CTRL_RESULT = 5,
++	CTRL_FSIZE_LO = 6,
++	CTRL_FSIZE_HI = 7,
++};
++
++bool CJsDiscImageDeviceStream::ResolveCtrl()
++{
++	if(m_ctrlResolved) return m_ctrl != nullptr;
++	m_ctrlResolved = true;
++	// One proxied call per boot (main is idle while the EE boots a disc).
++	int32_t ptr = MAIN_THREAD_EM_ASM_INT({
++		try
++		{
++			var d = Module.discImageDevice;
++			return (d && typeof d.getCtrlPtr === 'function') ? (d.getCtrlPtr() | 0) : 0;
++		}
++		catch(e)
++		{
++			return 0;
++		}
++	});
++	if(ptr == 0)
++	{
++		printf("PS2WEB(15): disc reads via legacy main-thread path\r\n");
++		return false;
++	}
++	m_ctrl = reinterpret_cast<volatile int32_t*>(static_cast<uintptr_t>(static_cast<uint32_t>(ptr)));
++	uint32 lo = static_cast<uint32>(m_ctrl[CTRL_FSIZE_LO]);
++	uint32 hi = static_cast<uint32>(m_ctrl[CTRL_FSIZE_HI]);
++	m_fileSize = static_cast<uint64>(lo) | (static_cast<uint64>(hi) << 32);
++	m_cache.resize(PS2WEB_DISC_CHUNK);
++	printf("PS2WEB(15): disc reads via IO worker (ctrl=%d, size=%llu, chunk=%u)\r\n", ptr, (unsigned long long)m_fileSize, (unsigned)PS2WEB_DISC_CHUNK);
++	return true;
++}
++
++int64 CJsDiscImageDeviceStream::WorkerRead(void* dst, uint64 position, uint32 size)
++{
++	auto _t0 = std::chrono::steady_clock::now();
++	g_ps2webDiscReads++;
++	volatile int32_t* c = m_ctrl;
++	c[CTRL_OFF_LO] = static_cast<int32_t>(static_cast<uint32>(position));
++	c[CTRL_OFF_HI] = static_cast<int32_t>(static_cast<uint32>(position >> 32));
++	c[CTRL_SIZE] = static_cast<int32_t>(size);
++	c[CTRL_DST] = static_cast<int32_t>(reinterpret_cast<uintptr_t>(dst));
++	__atomic_store_n(&c[CTRL_STATE], 1, __ATOMIC_SEQ_CST);
++	emscripten_futex_wake(const_cast<int32_t*>(&c[CTRL_STATE]), 1);
++	// Wait for the worker. Bounded: if it never answers (worker failed to start), fall back.
++	double waitedMs = 0;
++	while(__atomic_load_n(&c[CTRL_STATE], __ATOMIC_SEQ_CST) != 2)
++	{
++		int r = emscripten_futex_wait(const_cast<int32_t*>(&c[CTRL_STATE]), 1, 50);
++		if(r == -ETIMEDOUT)
++		{
++			waitedMs += 50;
++			if(waitedMs > 5000)
++			{
++				printf("PS2WEB(15): IO worker unresponsive, switching to legacy reads\r\n");
++				__atomic_store_n(&c[CTRL_STATE], 0, __ATOMIC_SEQ_CST);
++				m_ctrl = nullptr;
++				return -1;
++			}
++		}
++	}
++	int32_t n = c[CTRL_RESULT];
++	__atomic_store_n(&c[CTRL_STATE], 0, __ATOMIC_SEQ_CST);
++	emscripten_futex_wake(const_cast<int32_t*>(&c[CTRL_STATE]), 1);
++	g_ps2webDiscNs += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - _t0).count();
++	return n;
++}
+ 
+ void CJsDiscImageDeviceStream::Seek(int64 position, Framework::STREAM_SEEK_DIRECTION whence)
+ {
+@@ -16,6 +118,11 @@ void CJsDiscImageDeviceStream::Seek(int64 position, Framework::STREAM_SEEK_DIREC
+ 		break;
+ 	case Framework::STREAM_SEEK_END:
+ 	{
++		if(ResolveCtrl())
++		{
++			m_position = m_fileSize;
++			break;
++		}
+ 		uint32 positionLo = MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.getFileSize()});
+ 		uint32 positionHi = MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.getFileSize() / 4294967296});
+ 		m_position = static_cast<uint64>(positionLo) | (static_cast<uint64>(positionHi) << 32);
+@@ -32,9 +139,55 @@ uint64 CJsDiscImageDeviceStream::Tell()
+ uint64 CJsDiscImageDeviceStream::Read(void* buffer, uint64 size)
+ {
+ 	if(size == 0) return 0;
+-
+ 	assert(size <= std::numeric_limits<uint32>::max());
++	if(!ResolveCtrl())
++	{
++		return LegacyRead(buffer, size);
++	}
+ 
++	auto out = static_cast<uint8_t*>(buffer);
++	uint64 remaining = size;
++	while(remaining != 0)
++	{
++		if(m_position >= m_cacheStart && m_position < (m_cacheStart + m_cacheLen))
++		{
++			uint64 avail = (m_cacheStart + m_cacheLen) - m_position;
++			uint64 n = std::min(avail, remaining);
++			memcpy(out, m_cache.data() + (m_position - m_cacheStart), static_cast<size_t>(n));
++			out += n;
++			m_position += n;
++			remaining -= n;
++			continue;
++		}
++		if(remaining >= PS2WEB_DISC_CHUNK)
++		{
++			// Big read: go straight to the destination, no point in caching.
++			int64 n = WorkerRead(out, m_position, static_cast<uint32>(remaining));
++			if(n < 0) return (size - remaining) + LegacyRead(out, remaining);
++			out += n;
++			m_position += n;
++			remaining -= n;
++			if(n == 0) break;
++			continue;
++		}
++		// Miss: fetch the chunk-aligned window containing m_position.
++		uint64 start = m_position & ~(PS2WEB_DISC_CHUNK - 1);
++		uint64 want = PS2WEB_DISC_CHUNK;
++		if(m_fileSize != 0 && start + want > m_fileSize) want = (start < m_fileSize) ? (m_fileSize - start) : 0;
++		if(want == 0) break;
++		int64 n = WorkerRead(m_cache.data(), start, static_cast<uint32>(want));
++		if(n < 0) return (size - remaining) + LegacyRead(out, remaining);
++		m_cacheStart = start;
++		m_cacheLen = static_cast<uint64>(n);
++		if(n == 0 || m_position >= m_cacheStart + m_cacheLen) break;
++	}
++	return size - remaining;
++}
++
++uint64 CJsDiscImageDeviceStream::LegacyRead(void* buffer, uint64 size)
++{
++	auto _t0 = std::chrono::steady_clock::now();
++	g_ps2webDiscReads++;
+ 	uint32 positionLow = static_cast<uint32>(m_position);
+ 	uint32 positionHigh = static_cast<uint32>(m_position >> 32);
+ 
+@@ -50,6 +203,7 @@ uint64 CJsDiscImageDeviceStream::Read(void* buffer, uint64 size)
+ 		usleep(100);
+ 	}
+ 	m_position += size;
++	g_ps2webDiscNs += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - _t0).count();
+ 	return size;
+ }
+ 
+diff --git a/Source/Js_DiscImageDeviceStream.h b/Source/Js_DiscImageDeviceStream.h
+index 07026720..b7ba5c50 100644
+--- a/Source/Js_DiscImageDeviceStream.h
++++ b/Source/Js_DiscImageDeviceStream.h
+@@ -1,6 +1,8 @@
+ #pragma once
+ 
+ #include "Stream.h"
++#include <vector>
++#include <cstdint>
+ 
+ class CJsDiscImageDeviceStream : public Framework::CStream
+ {
+@@ -15,5 +17,16 @@ public:
+ 	void Flush() override;
+ 
+ private:
++	// PS2WEB(15): off-main-thread disc reads (see DiscImageDevice.ts) + read-ahead cache.
++	bool ResolveCtrl();
++	int64 WorkerRead(void* dst, uint64 position, uint32 size);
++	uint64 LegacyRead(void* buffer, uint64 size);
++
+ 	uint64 m_position = 0;
++	volatile int32_t* m_ctrl = nullptr; // control block shared with the IO worker (0 = legacy)
++	bool m_ctrlResolved = false;
++	uint64 m_fileSize = 0;
++	std::vector<uint8_t> m_cache;
++	uint64 m_cacheStart = 0;
++	uint64 m_cacheLen = 0;
+ };
+diff --git a/Source/iop/Iop_SpuBase.cpp b/Source/iop/Iop_SpuBase.cpp
+index 231400b3..ddd023ce 100644
+--- a/Source/iop/Iop_SpuBase.cpp
++++ b/Source/iop/Iop_SpuBase.cpp
+@@ -714,8 +714,25 @@ void CSpuBase::MixSamples(int32 inputSample, int32 volumeLevel, int16* output)
+ 	*output = static_cast<int16>(resultSample);
+ }
+ 
++#ifdef __EMSCRIPTEN__
++#include <chrono>
++#include <atomic>
++extern std::atomic<uint64_t> g_ps2webSpuNs; // PS2WEB(15): host time in SPU synthesis (both cores)
++namespace
++{
++	struct Ps2webSpuTimer
++	{
++		std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
++		~Ps2webSpuTimer() { g_ps2webSpuNs += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count(); }
++	};
++}
++#endif
++
+ void CSpuBase::Render(int16* samples, unsigned int sampleCount)
+ {
++#ifdef __EMSCRIPTEN__
++	Ps2webSpuTimer _ps2webSpuTimer;
++#endif
+ 	bool updateReverb = m_reverbEnabled && (m_ctrl & CONTROL_REVERB) && (m_reverbWorkAddrStart < m_reverbWorkAddrEnd);
+ 	bool irqEnabled = (m_ctrl & CONTROL_IRQ);
+ 
+diff --git a/Source/ui_js/Main.cpp b/Source/ui_js/Main.cpp
+index b8842e4c..675d7139 100644
+--- a/Source/ui_js/Main.cpp
++++ b/Source/ui_js/Main.cpp
+@@ -13,7 +13,11 @@
+ #include "InputProviderEmscripten.h"
+ #include "ui_shared/StatsManager.h"
+ #include "DefaultAppConfig.h"
++#include "PS2VM_Preferences.h"
++#include "AppConfig.h"
+ #include "ee/Ee_SubSystem.h"
++#include "iop/Iop_SubSystem.h"
++#include "GenericMipsExecutor.h"
+ #include "Ps2Const.h"
+ 
+ CPs2VmJs* g_virtualMachine = nullptr;
+@@ -53,7 +57,10 @@ EM_BOOL keyboardCallback(int eventType, const EmscriptenKeyboardEvent* keyEvent,
+ }
+ 
+ int g_ps2webGsOwnsContext = 1; // PS2WEB(14): 1 = GS pthread owns the canvas/WebGL context. Set once in initVm.
++extern std::atomic<uint64_t> g_ps2webIopExecNs; // PS2WEB(15), BasicBlock.cpp
+ static std::atomic<int> g_ps2webVmReady{0};
++static std::atomic<uint32_t> g_ps2webVblanks{0}; // PS2WEB(15)
++CPS2VM::NewFrameEvent::Connection g_ps2webVblankConnection;
+ extern "C" void initVmPhase2();
+ extern "C" void initVm()
+ {
+@@ -165,6 +172,11 @@ extern "C" void initVmPhase2()
+ 	// PS2WEB(FASE 0): wire the VM frame event to CStatsManager so eeIdle/eeTotal ticks accumulate
+ 	// (upstream ios/qt do this; the JS build never did → getEeIdlePct would read zeros without it).
+ 	g_ps2webCpuUtilConnection = g_virtualMachine->OnNewFrame.Connect(std::bind(&CStatsManager::OnNewFrame, &CStatsManager::GetInstance(), g_virtualMachine));
++	// PS2WEB(15): count VM vblanks. "fps" (GS flips) undercounts speed for games that present every
++	// other vblank; vblanks/s vs the CRT rate (50 PAL / 60 NTSC) is the true emulation speed.
++	g_ps2webVblankConnection = g_virtualMachine->OnNewFrame.Connect([]() { g_ps2webVblanks.fetch_add(1, std::memory_order_relaxed); });
++	// PS2WEB(15): time the IOP JIT (runs on the EE thread, was invisible in the profile).
++	if(auto iopExec = dynamic_cast<CGenericMipsExecutor<BlockLookupOneWay>*>(g_virtualMachine->m_iop->m_cpu.m_executor.get())) iopExec->m_ps2webExecNs = &g_ps2webIopExecNs;
+ 
+ 	EMSCRIPTEN_RESULT result = EMSCRIPTEN_RESULT_SUCCESS;
+ 
+@@ -177,8 +189,25 @@ extern "C" void initVmPhase2()
+ 	printf("PS2WEB(14): VM ready (phase 2 done)\r\n");
+ }
+ 
++// PS2WEB(15): runtime toggle of the frame-rate limiter (diagnostic: measures how much of the
++// EE thread's time is the limiter's sleep vs real work). 1 = on (upstream default), 0 = off.
++void setFrameLimit(int on)
++{
++	CAppConfig::GetInstance().SetPreferenceBoolean(PREF_PS2_LIMIT_FRAMERATE, on != 0);
++	if(g_virtualMachine) g_virtualMachine->ReloadFrameRateLimit();
++}
++double getVblanks() { return static_cast<double>(g_ps2webVblanks.load(std::memory_order_relaxed)); }
++int getCrtFrameRate() { return (g_virtualMachine && g_virtualMachine->GetGSHandler()) ? static_cast<int>(g_virtualMachine->GetGSHandler()->GetCrtFrameRate()) : 60; }
++extern int g_ps2webLimiterMode; // PS2WEB(15), FrameLimiter.cpp
++void setLimiterMode(int m) { g_ps2webLimiterMode = (m != 0) ? 1 : 0; }
++int getLimiterMode() { return g_ps2webLimiterMode; }
++int getFrameLimit() { return CAppConfig::GetInstance().GetPreferenceBoolean(PREF_PS2_LIMIT_FRAMERATE) ? 1 : 0; }
+ // 0 = waiting for the GS thread, 1 = GS up (JS must call initVmPhase2), 2 = ready.
+ int getVmInitState() { return g_ps2webVmReady.load(); }
++// PS2WEB(15): control block shared with the disc IO worker (DiscImageDevice.ts). Static so JS
++// needs neither _malloc nor a free; one disc at a time.
++alignas(64) static int32_t g_ps2webDiscCtrl[16] = {0};
++int getDiscCtrlPtr() { return static_cast<int>(reinterpret_cast<uintptr_t>(&g_ps2webDiscCtrl[0])); }
+ 
+ void bootElf(std::string path)
+ {
+@@ -227,6 +256,11 @@ extern std::atomic<uint32_t> g_ps2webStaleReverts;
+ // PS2WEB(FASE 0 / PROFILE-DBZ): frame-time breakdown accumulators (cumulative ns) + VU block count.
+ extern std::atomic<uint64_t> g_ps2webEeExecNs;
+ extern std::atomic<uint64_t> g_ps2webVuExecNs;
++extern std::atomic<uint64_t> g_ps2webIopExecNs; // PS2WEB(15)
++extern std::atomic<uint64_t> g_ps2webSpuNs;
++extern std::atomic<uint64_t> g_ps2webLimiterNs;
++extern std::atomic<uint64_t> g_ps2webDiscNs;
++extern std::atomic<uint64_t> g_ps2webDiscReads;
+ extern std::atomic<uint64_t> g_ps2webGsBusyNs;
+ extern std::atomic<uint64_t> g_ps2webGsWaitNs;
+ extern std::atomic<uint64_t> g_ps2webGsStallNs;
+@@ -260,6 +294,12 @@ int getStaleReverts() { return static_cast<int>(g_ps2webStaleReverts.load()); }
+ // here as cumulative MILLISECONDS. The overlay diffs successive reads to get a per-interval share.
+ double getEeExecMs() { return g_ps2webEeExecNs.load() / 1e6; }
+ double getVuExecMs() { return g_ps2webVuExecNs.load() / 1e6; }
++// PS2WEB(15)
++double getIopExecMs() { return g_ps2webIopExecNs.load() / 1e6; }
++double getSpuMs() { return g_ps2webSpuNs.load() / 1e6; }
++double getLimiterMs() { return g_ps2webLimiterNs.load() / 1e6; }
++double getDiscMs() { return g_ps2webDiscNs.load() / 1e6; }
++double getDiscReads() { return static_cast<double>(g_ps2webDiscReads.load()); }
+ double getGsBusyMs() { return g_ps2webGsBusyNs.load() / 1e6; }
+ double getGsWaitMs() { return g_ps2webGsWaitNs.load() / 1e6; }
+ double getGsStallMs() { return g_ps2webGsStallNs.load() / 1e6; }
+@@ -307,6 +347,13 @@ EMSCRIPTEN_BINDINGS(Play)
+ 	function("getFrames", &getFrames);
+ 	function("clearStats", &clearStats);
+ 	function("getVmInitState", &getVmInitState); // PS2WEB(14)
++	function("getDiscCtrlPtr", &getDiscCtrlPtr); // PS2WEB(15)
++	function("setFrameLimit", &setFrameLimit);
++	function("getVblanks", &getVblanks);
++	function("setLimiterMode", &setLimiterMode);
++	function("getLimiterMode", &getLimiterMode);
++	function("getCrtFrameRate", &getCrtFrameRate);
++	function("getFrameLimit", &getFrameLimit);
+ 	function("getJitMs", &getJitMs);
+ 	function("getJitBlocks", &getJitBlocks);
+ 	function("getDispatches", &getDispatches);
+@@ -329,6 +376,11 @@ EMSCRIPTEN_BINDINGS(Play)
+ 	// PS2WEB(FASE 0 / PROFILE-DBZ): frame-time breakdown + EE idle% + draw calls + VU block count.
+ 	function("getEeExecMs", &getEeExecMs);
+ 	function("getVuExecMs", &getVuExecMs);
++	function("getIopExecMs", &getIopExecMs); // PS2WEB(15)
++	function("getSpuMs", &getSpuMs);
++	function("getLimiterMs", &getLimiterMs);
++	function("getDiscMs", &getDiscMs);
++	function("getDiscReads", &getDiscReads);
+ 	function("getGsBusyMs", &getGsBusyMs);
+ 	function("getGsWaitMs", &getGsWaitMs);
+ 	function("getGsStallMs", &getGsStallMs);

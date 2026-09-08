@@ -22,12 +22,20 @@ export function startMetrics(playModule: any) {
     eeExecMsS: 0, vuExecMsS: 0, gsBusyMsS: 0, gsWaitMsS: 0, gsStallMsS: 0,
     gsFrameskip: 0, // PS2WEB(FASE 1C): 0=off. Set via __ps2web.setFrameskip(n) or PlayModule.setGsFrameskip(n).
     gsDiag: 0,      // PS2WEB(FASE 1C.2) diagnostic: 0=normal, 1=no rasterization, 2=no render pass.
+    // PS2WEB(15): rest of the EE thread's host time per second (ms/s): IOP JIT, SPU synthesis, frame
+    // limiter sleep, disc reads (worker or legacy main-thread path) + how many reads left wasm.
+    iopExecMsS: 0, spuMsS: 0, limiterMsS: 0, discMsS: 0, discReadsS: 0,
+    // PS2WEB(15): TRUE emulation speed = VM vblanks per second vs the CRT rate (50 PAL / 60 NTSC).
+    // `fps`/`emuSpeedPct` count GS flips, which undercount games that present every other vblank.
+    vblanksPerSec: 0, crtFrameRate: 60, vmSpeedPct: 0,
     ts: Date.now() };
   (window as any).__ps2web_metrics = metrics;
 
   // PS2WEB(FASE 0): the ns counters are cumulative-from-boot, so we diff successive reads to get a
   // per-interval share. Kept outside the tick so warmup doesn't pollute the steady-state ratio.
   let prevProf = { ee: 0, vu: 0, gsBusy: 0, gsWait: 0, gsStall: 0 };
+  let prevProf15 = { iop: 0, spu: 0, lim: 0, disc: 0, reads: 0 }; // PS2WEB(15)
+  let prevVblanks = 0; // PS2WEB(15)
 
   let last = performance.now();
   setInterval(() => {
@@ -90,6 +98,20 @@ export function startMetrics(playModule: any) {
       metrics.framePctGsStall = eeThread > 0 ? Math.round((dGsStall / eeThread) * 1000) / 10 : 0;
       // GS-thread load: rasterizing vs idle. High => GS is the bottleneck (pairs with high EE idle%).
       metrics.gsLoadPct = (dGsBusy + dGsWait) > 0 ? Math.round((dGsBusy / (dGsBusy + dGsWait)) * 1000) / 10 : 0;
+    } catch (e) {}
+    try {
+      const iop = playModule.getIopExecMs(), spu = playModule.getSpuMs(), lim = playModule.getLimiterMs(), disc = playModule.getDiscMs(), reads = playModule.getDiscReads();
+      metrics.iopExecMsS = Math.round(Math.max(0, iop - prevProf15.iop)); metrics.spuMsS = Math.round(Math.max(0, spu - prevProf15.spu));
+      metrics.limiterMsS = Math.round(Math.max(0, lim - prevProf15.lim)); metrics.discMsS = Math.round(Math.max(0, disc - prevProf15.disc));
+      metrics.discReadsS = Math.round(Math.max(0, reads - prevProf15.reads));
+      prevProf15 = { iop, spu, lim, disc, reads };
+    } catch (e) {}
+    try {
+      const vb = playModule.getVblanks(), crt = playModule.getCrtFrameRate();
+      const dVb = Math.max(0, vb - prevVblanks); prevVblanks = vb;
+      metrics.vblanksPerSec = dt > 0 ? Math.round((dVb / dt) * 10) / 10 : 0;
+      metrics.crtFrameRate = crt;
+      metrics.vmSpeedPct = (dt > 0 && crt > 0) ? Math.round((dVb / dt) / crt * 1000) / 10 : 0;
     } catch (e) {}
     try { metrics.vuBlocks = playModule.getVuBlocks(); } catch (e) {}
     try { metrics.gsFrameskip = playModule.getGsFrameskip(); } catch (e) {}

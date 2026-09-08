@@ -123,3 +123,26 @@ inversión.** Además hay un techo ~65 % con GS y EE casi parados (pantalla de r
 gsBusy 105, eeIdle 96 %, speed 64,5 %) → sospecha I/O CDVD desde OPFS / pacing del EmuThread / IOP-SPU2.
 Nota: base en Chrome/M2 = 47–54 % con render completo (las medidas de julio, 13 %, eran Firefox).
 Plan de pruebas y siguientes métricas (`setGsDiag(3/4)`, cdvd/iop/sleep): `docs/QA-PLAN.md`.
+
+## 12. FASE 1C.3/1C.4 — patches 14 y 15 (2026-09-08, tarde)
+
+**Causa del "GS ocupado sin dibujar" (§11): el proxy de GL.** Con `-sOFFSCREEN_FRAMEBUFFER` el contexto WebGL
+vivía en el hilo principal; cada gl* del pthread GS iba proxied, y `glTexImage2D/glTexSubImage2D` ≥256 KB,
+`glGenTextures`, `glDeleteTextures`, `glReadPixels` son round-trips SÍNCRONOS. **Patch 14**: el GS es dueño del
+canvas (OffscreenCanvas) y crea su contexto; el hilo vive en su event loop (`Ps2webDrain`/`Ps2webKick`) porque
+OffscreenCanvas solo presenta al ceder; `initVm` en dos fases. A/B: `?gsproxy=1`.
+
+**Causa del "techo 65 % con EE y GS parados" (QA-PLAN §2.2): dos cosas.**
+1. Cada lectura de sector del ISO era un proxy síncrono a main + sondeo (`isDone`) con más proxies + `usleep`.
+   **Patch 15**: IO worker con `FileReaderSync` y bloque de control en memoria wasm (futex), read-ahead 256 KB.
+   A/B: `?discproxy=1`.
+2. **Artefacto de métrica**: `fps`/`emuSpeedPct` cuentan flips del GS ÷ 60. DBZ BT3 PAL presenta 25 flips/s en
+   menús → "42 %" cuando la VM va a 50 vblanks/s = **100 %**. Nueva métrica `vmSpeedPct` (vblanks/s ÷ CRT).
+   Además `limiterMsS`: en el menú el limitador duerme ~600 ms/s = 60 % de CPU libre en el hilo EE.
+   Limitador reescrito con deadline absoluto (el upstream no descontaba los despertares tardíos).
+
+Sandbox (Chromium headless + SwiftShader, 4 vCPU): cube 36 fps (GS propio) vs 27 (proxy), golden intacto;
+DBZ menú `vmSpeed 100 %`, `iop` 60–90 ms/s, `spu` 25–30, `ee` 100–500, `disc` 0 tras el arranque.
+CI (c58814f): build + smoke + harness (golden) verdes; `deploy` falla por `VERCEL_TOKEN` caducado.
+**Pendiente: medir combate en el Mac** (gsBusy/gsStall/vmSpeedPct con y sin `?gsproxy=1`). Si el GS sigue
+saturado ya sin proxy → ahora sí toca estado/batching de draws (§10); si no → siguiente muro.

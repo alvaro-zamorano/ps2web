@@ -146,3 +146,18 @@ DBZ menú `vmSpeed 100 %`, `iop` 60–90 ms/s, `spu` 25–30, `ee` 100–500, `d
 CI (c58814f): build + smoke + harness (golden) verdes; `deploy` falla por `VERCEL_TOKEN` caducado.
 **Pendiente: medir combate en el Mac** (gsBusy/gsStall/vmSpeedPct con y sin `?gsproxy=1`). Si el GS sigue
 saturado ya sin proxy → ahora sí toca estado/batching de draws (§10); si no → siguiente muro.
+
+## 13. RESULTADO (2026-09-09, Mac M2/Chrome, producción con patches 14+15+16)
+
+| escena | vmSpeedPct | flips/s | draws/f | gsBusy ms/s | gsStall | EE libre (limiter ms/s) |
+|---|---|---|---|---|---|---|
+| menú idioma | 100 | 50 | 8 | 27 | 0 | 674 |
+| Dragon History (cinemática 3D) | 100 | 46 | 552 | 182 | 0 | 444 |
+| **combate Goku vs Raditz (20 s)** | **100,0 (mín 99,9)** | **50** | **1134** | 359 | **0** | 298 |
+| combate sin limitador (capacidad) | 131 | 61 | 1075 | 456 | 1 | 8 |
+
+Con 14+15 pero el limitador de 2 frames: 88 % (deadline) / 95,5 % (upstream) → patch 16 (ventana 10 frames).
+Ayer mismo, misma máquina y escena: 54 % (32 flips/s, gsBusy 861, gsStall 319). Julio: 13 %.
+**DBZ BT3 es jugable a velocidad completa en Chrome/M2.** Pendiente de calidad: texturas IDTEX
+(glitches en escenarios/personajes en combate; los menús y cinemáticas se ven bien), memory card
+no persistente entre recargas, badge del tracker por serial.

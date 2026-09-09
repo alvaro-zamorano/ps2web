@@ -1,0 +1,21 @@
+diff --git a/Source/FrameLimiter.cpp b/Source/FrameLimiter.cpp
+index 05d12ce8..b2aaba5b 100644
+--- a/Source/FrameLimiter.cpp
++++ b/Source/FrameLimiter.cpp
+@@ -63,10 +63,13 @@ void CFrameLimiter::EndFrame()
+ 			m_frameStarted = false;
+ 			return;
+ 		}
+-		if(!m_ps2webDeadlineValid || (now > (m_ps2webDeadline + m_minFrameDuration * 2)))
++		// PS2WEB(16): catch-up window. Measured on the Mac (DBZ combat, capacity 131%): with a 2-frame
++		// window every heavy stretch (>40 ms of lag) threw the lag away, and the light frames that
++		// followed slept instead of repaying it -> 88% with 28% of the EE thread idle. 10 frames
++		// (200 ms at PAL) lets a hitch be repaid with a short, imperceptible >100% burst; beyond that
++		// (loading, JIT warmup) we resync instead of chasing.
++		if(!m_ps2webDeadlineValid || (now > (m_ps2webDeadline + m_minFrameDuration * 10)))
+ 		{
+-			// First frame, or we are more than two frames behind (loading, JIT warmup): resync
+-			// instead of trying to catch up with a burst.
+ 			m_ps2webDeadline = now;
+ 			m_ps2webDeadlineValid = true;
+ 		}

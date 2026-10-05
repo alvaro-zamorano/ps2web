@@ -1,0 +1,71 @@
+diff --git a/Source/gs/GSH_OpenGL/GSH_OpenGL.cpp b/Source/gs/GSH_OpenGL/GSH_OpenGL.cpp
+index 8befdafe..12e71ee4 100644
+--- a/Source/gs/GSH_OpenGL/GSH_OpenGL.cpp
++++ b/Source/gs/GSH_OpenGL/GSH_OpenGL.cpp
+@@ -1285,6 +1285,7 @@ void CGSH_OpenGL::SetupTexture(uint64 primReg, uint64 tex0Reg, uint64 tex1Reg, u
+ 	auto texInfo = PrepareTexture(tex0);
+ 	m_renderState.texture0Handle = texInfo.textureHandle;
+ 	m_renderState.texture0AlphaAsIndex = texInfo.alphaAsIndex;
++	m_fragmentParams.alphaAsIndex = texInfo.alphaAsIndex ? 1.0f : 0.0f; //PS2WEB(17)
+ 
+ 	//Setup sampling modes
+ 	switch(tex1.nMagFilter)
+diff --git a/Source/gs/GSH_OpenGL/GSH_OpenGL.h b/Source/gs/GSH_OpenGL/GSH_OpenGL.h
+index 290deb70..34e3859a 100644
+--- a/Source/gs/GSH_OpenGL/GSH_OpenGL.h
++++ b/Source/gs/GSH_OpenGL/GSH_OpenGL.h
+@@ -172,7 +172,7 @@ private:
+ 		uint32 alphaRef;
+ 		float alphaFix;
+ 		float fogColor[3];
+-		float padding2;
++		float alphaAsIndex; //PS2WEB(17): 1 = index lives in alpha (PSMT8H over a PSMCT32 framebuffer)
+ 	};
+ 	static_assert(sizeof(FRAGMENTPARAMS) == 0x40, "Size of FRAGMENTPARAMS must be 64 bytes.");
+ 
+diff --git a/Source/gs/GSH_OpenGL/GSH_OpenGL_Shader.cpp b/Source/gs/GSH_OpenGL/GSH_OpenGL_Shader.cpp
+index 3f37572a..86f86d63 100644
+--- a/Source/gs/GSH_OpenGL/GSH_OpenGL_Shader.cpp
++++ b/Source/gs/GSH_OpenGL/GSH_OpenGL_Shader.cpp
+@@ -188,8 +188,17 @@ Framework::OpenGl::CShader CGSH_OpenGL::GenerateFragmentShader(const SHADERCAPS&
+ 	shaderBuilder << "	uint g_alphaRef;" << std::endl;
+ 	shaderBuilder << "	float g_alphaFix;" << std::endl;
+ 	shaderBuilder << "	vec3 g_fogColor;" << std::endl;
++	shaderBuilder << "	float g_alphaAsIndex;" << std::endl;
+ 	shaderBuilder << "};" << std::endl;
+ 
++	//PS2WEB(17): WebGL2 has no GL_TEXTURE_SWIZZLE_*, so the upstream R<-A swizzle used for
++	//alphaAsIndex (PSMT8H read of a PSMCT32 framebuffer) never took effect in the browser and the
++	//shader indexed the CLUT with the RED channel. Pick the channel in the shader instead.
++	shaderBuilder << "float ps2webIndex(vec4 s)" << std::endl;
++	shaderBuilder << "{" << std::endl;
++	shaderBuilder << "	return (g_alphaAsIndex != 0.0) ? s.a : s.r;" << std::endl;
++	shaderBuilder << "}" << std::endl;
++
+ 	if(caps.texClampS == TEXTURE_CLAMP_MODE_REGION_REPEAT || caps.texClampT == TEXTURE_CLAMP_MODE_REGION_REPEAT)
+ 	{
+ 		shaderBuilder << s_andFunction << std::endl;
+@@ -254,7 +263,7 @@ Framework::OpenGl::CShader CGSH_OpenGL::GenerateFragmentShader(const SHADERCAPS&
+ 	{
+ 		if(!caps.texBilinearFilter)
+ 		{
+-			shaderBuilder << "	float colorIndex = texture(g_texture, texCoord.st).r * 255.0;" << std::endl;
++			shaderBuilder << "	float colorIndex = ps2webIndex(texture(g_texture, texCoord.st)) * 255.0;" << std::endl;
+ 			if(caps.texSourceMode == TEXTURE_SOURCE_MODE_IDX4)
+ 			{
+ 				shaderBuilder << "	float paletteTexelBias = 0.5 / 16.0;" << std::endl;
+@@ -268,10 +277,10 @@ Framework::OpenGl::CShader CGSH_OpenGL::GenerateFragmentShader(const SHADERCAPS&
+ 		}
+ 		else
+ 		{
+-			shaderBuilder << "	float tlIdx = texture(g_texture, texCoord.st                                     ).r * 255.0;" << std::endl;
+-			shaderBuilder << "	float trIdx = texture(g_texture, texCoord.st + vec2(g_texelSize.x, 0)            ).r * 255.0;" << std::endl;
+-			shaderBuilder << "	float blIdx = texture(g_texture, texCoord.st + vec2(0, g_texelSize.y)            ).r * 255.0;" << std::endl;
+-			shaderBuilder << "	float brIdx = texture(g_texture, texCoord.st + vec2(g_texelSize.x, g_texelSize.y)).r * 255.0;" << std::endl;
++			shaderBuilder << "	float tlIdx = ps2webIndex(texture(g_texture, texCoord.st                                     )) * 255.0;" << std::endl;
++			shaderBuilder << "	float trIdx = ps2webIndex(texture(g_texture, texCoord.st + vec2(g_texelSize.x, 0)            )) * 255.0;" << std::endl;
++			shaderBuilder << "	float blIdx = ps2webIndex(texture(g_texture, texCoord.st + vec2(0, g_texelSize.y)            )) * 255.0;" << std::endl;
++			shaderBuilder << "	float brIdx = ps2webIndex(texture(g_texture, texCoord.st + vec2(g_texelSize.x, g_texelSize.y))) * 255.0;" << std::endl;
+ 
+ 			if(caps.texSourceMode == TEXTURE_SOURCE_MODE_IDX4)
+ 			{

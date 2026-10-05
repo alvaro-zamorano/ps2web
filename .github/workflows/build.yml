@@ -8,7 +8,12 @@ jobs:
   # --- F1: build a licensed homebrew ELF fixture (ps2sdk 'cube', AFL v2.0) ---
   fixtures:
     runs-on: ubuntu-latest
-    container: ps2dev/ps2dev:latest
+    # Pinned by digest. The cube golden (stateHashAtN 3049433245) is a property of the exact binary
+    # this toolchain builds (cube.elf sha1 974e20b3...). ps2dev/ps2dev:latest was re-pushed on
+    # 2026-10-03 and now builds a different cube.elf whose frame-180 hash is not the golden, which
+    # turned the gate red with no code change. This digest is the one the last green run used
+    # (run #70, 2026-09-09) and reproduces both fixtures byte for byte.
+    container: ps2dev/ps2dev@sha256:2d79add64e99251b4632c1eac2600c5749d8b51d704dc6e48a3fc84419a75512
     steps:
       - name: Checkout ps2web
         uses: actions/checkout@v4
@@ -21,6 +26,9 @@ jobs:
           ( cd tests/fixtures/src/cube && make && test -f cube.elf && cp cube.elf /tmp/fixtures/ )
           ( cd tests/fixtures/src/vu1  && make && test -f vu1.elf  && cp vu1.elf  /tmp/fixtures/ ) || echo "WARN: vu1 fixture build failed (non-fatal)"
           ls -la /tmp/fixtures
+          # Fail loud if the toolchain ever stops reproducing the golden binary.
+          echo "974e20b32b19280db0f370551b4009ffd385dea8  /tmp/fixtures/cube.elf" | sha1sum -c -
+          if [ -f /tmp/fixtures/vu1.elf ]; then echo "d6daa9d746a0ec42895794df22014bdc7e7c2e07  /tmp/fixtures/vu1.elf" | sha1sum -c - || echo "WARN: vu1.elf differs from the reference binary"; fi
       - name: Upload fixtures
         uses: actions/upload-artifact@v4
         with:
@@ -232,7 +240,8 @@ jobs:
 
   # --- F8: deploy prebuilt dist to Vercel with COOP/COEP (needs VERCEL_TOKEN secret) ---
   deploy:
-    needs: build
+    # Never publish a build whose golden gate did not pass.
+    needs: [build, harness]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:

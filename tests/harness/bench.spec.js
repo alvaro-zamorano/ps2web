@@ -105,6 +105,7 @@ test(`bench ${FIXTURE}`, async ({ page }) => {
     staleReverts: samples.length ? (samples[samples.length - 1].staleReverts || 0) : 0,
     stateHash: samples.length ? (samples[samples.length - 1].stateHash || 0) : 0,
     stateHashAtN: samples.length ? (samples[samples.length - 1].stateHashAtN || 0) : 0,
+    stateHashAtVblankN: samples.length ? (samples[samples.length - 1].stateHashAtVblankN || 0) : 0,
     totalFrames: samples.length ? (samples[samples.length - 1].totalFrames || 0) : 0,
     stateHashes: samples.map(s => s.stateHash),
     dispatchesPerSec: (samples.length > 1 && samples[samples.length-1].blockDispatches && samples[0].blockDispatches)
@@ -135,7 +136,7 @@ test(`bench ${FIXTURE}`, async ({ page }) => {
     fs.writeFileSync(baselinePath, JSON.stringify(result, null, 2));
   }
 
-  console.log(`[bench] ${FIXTURE} avgFps=${result.avgFps} emu=${result.avgEmuSpeedPct}% p95ms=${result.p95MsPerFrame} threadsOk=${result.threadsOk} cores=${result.cores} jitMs=${result.jitCompileMs} jitBlocks=${result.jitBlocks} dispatch/s=${result.dispatchesPerSec} chainMap=${result.chainMapEntries} tblMismatch=${result.chainTableMismatches} execMismatch=${result.execMismatches} stateHash=${result.stateHash} stateHashAtN=${result.stateHashAtN} hashMatchesBaseline=${result.simdHashMatchesBaseline}`);
+  console.log(`[bench] ${FIXTURE} avgFps=${result.avgFps} emu=${result.avgEmuSpeedPct}% p95ms=${result.p95MsPerFrame} threadsOk=${result.threadsOk} cores=${result.cores} jitMs=${result.jitCompileMs} jitBlocks=${result.jitBlocks} dispatch/s=${result.dispatchesPerSec} chainMap=${result.chainMapEntries} tblMismatch=${result.chainTableMismatches} execMismatch=${result.execMismatches} stateHash=${result.stateHash} stateHashAtN=${result.stateHashAtN} stateHashAtVblankN=${result.stateHashAtVblankN} hashMatchesBaseline=${result.simdHashMatchesBaseline}`);
   // JIT-04 baseline (Sprint 2 checkpoint): how many wasm modules does one fixture create?
   console.log(`[jit-04] ${FIXTURE} modulesCreated=${result.modulesCreated} instancesCreated=${result.instancesCreated} moduleBytes=${result.moduleBytes} jitBlocks=${result.jitBlocks} blocksPerModule=${result.blocksPerModule}`);
   // THE number: code-space is paid for LIVE modules. Batching must push blocksPerLiveModule >> 1.
@@ -163,6 +164,7 @@ test(`bench ${FIXTURE}`, async ({ page }) => {
   expect(result.avgFps, 'EMULATOR IS DEAD (0 fps) — not a hash drift, it stopped executing').toBeGreaterThan(0);
   expect(result.totalFrames, 'EMULATOR IS DEAD (rendered no frames)').toBeGreaterThan(0);
   expect(result.stateHashAtN, 'EMULATOR NEVER REACHED THE ANCHOR FRAME (hash still 0)').not.toBe(0);
+  expect(result.stateHashAtVblankN, 'EMULATOR NEVER REACHED THE ANCHOR VBLANK (hash still 0)').not.toBe(0);
 
   expect(result.chainTableMismatches, 'flat linear-memory chain table must match the reference map (0 mismatches)').toBe(0);
   expect(result.execMismatches, 'per-executor map insert/lookup must be self-consistent (0 mismatches)').toBe(0);
@@ -170,9 +172,12 @@ test(`bench ${FIXTURE}`, async ({ page }) => {
   if (FIXTURE === 'cube') {
     const gp = path.join(outDir, 'cube-golden.json');
     if (fs.existsSync(gp)) {
-      const golden = JSON.parse(fs.readFileSync(gp, 'utf8')).stateHashAtN;
-      console.log(`[gate] cube stateHashAtN=${result.stateHashAtN} golden=${golden}`);
-      expect(result.stateHashAtN, 'cube EE-state hash must match golden (JIT correctness gate)').toBe(golden);
+      // PS2WEB(18): gate on the EMU-thread snapshot at VM vblank 180 (deterministic: one value over
+      // 17 local runs in all four batch modes). stateHashAtN is sampled from the GS thread while the EE
+      // keeps running and took four different values on the same build, so it is logged, not gated.
+      const golden = JSON.parse(fs.readFileSync(gp, 'utf8'));
+      console.log(`[gate] cube stateHashAtVblankN=${result.stateHashAtVblankN} golden=${golden.stateHashAtVblankN} (racy stateHashAtN=${result.stateHashAtN}, informational)`);
+      expect(result.stateHashAtVblankN, 'cube EE-state hash at vblank 180 must match golden (JIT correctness gate)').toBe(golden.stateHashAtVblankN);
     }
   }
 

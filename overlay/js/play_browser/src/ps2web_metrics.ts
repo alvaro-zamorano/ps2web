@@ -13,7 +13,7 @@ export function startMetrics(playModule: any) {
   const cores = (navigator as any).hardwareConcurrency || 0;
   // PS2WEB(Sprint 2 / JIT-04): modulesCreated/instancesCreated/moduleBytes = the code-space
   // baseline. Today ~1 wasm module per MIPS block; batching must cut modulesCreated >=10x.
-  const metrics = { fps: 0, emuSpeedPct: 0, msPerFrame: 0, frameHash: null as number | null, threadsOk, cores, jitCompileMs: 0, jitBlocks: 0, blockDispatches: 0, chainMapEntries: 0, chainTableMismatches: -1, execMismatches: -1, modulesCreated: 0, instancesCreated: 0, moduleBytes: 0, blocksPerModule: 0, modulesLive: 0, modulesReleased: 0, batchesEmitted: 0, batchedBlocks: 0, batchSkipped: 0, blocksPerLiveModule: 0, batchBadIndices: 0, firstBatchIndex: 0, badInstances: 0, regionFallbacks: 0, staleReverts: 0, stateHash: 0, stateHashAtN: 0, totalFrames: 0,
+  const metrics = { fps: 0, emuSpeedPct: 0, msPerFrame: 0, frameHash: null as number | null, threadsOk, cores, jitCompileMs: 0, jitBlocks: 0, blockDispatches: 0, chainMapEntries: 0, chainTableMismatches: -1, execMismatches: -1, modulesCreated: 0, instancesCreated: 0, moduleBytes: 0, blocksPerModule: 0, modulesLive: 0, modulesReleased: 0, batchesEmitted: 0, batchedBlocks: 0, batchSkipped: 0, blocksPerLiveModule: 0, batchBadIndices: 0, firstBatchIndex: 0, badInstances: 0, regionFallbacks: 0, staleReverts: 0, stateHash: 0, stateHashAtN: 0, stateHashAtVblankN: 0, totalFrames: 0,
     // PS2WEB(FASE 0 / PROFILE-DBZ): frame-time breakdown. eeIdlePct + drawCallsPerFrame are the
     // top-level bottleneck signals; framePct{Ee,Vu,GsStall} split the EE thread's wall time this
     // interval; gsLoadPct is the GS thread's busy fraction; *MsS are raw per-second milliseconds.
@@ -118,6 +118,7 @@ export function startMetrics(playModule: any) {
     try { metrics.gsDiag = playModule.getGsDiag(); } catch (e) {}
     try { metrics.stateHash = playModule.getStateHash(); } catch (e) {}
     try { metrics.stateHashAtN = playModule.getStateHashAtN(); metrics.totalFrames = playModule.getTotalFrames(); } catch (e) {}
+    try { metrics.stateHashAtVblankN = playModule.getStateHashAtVblankN(); } catch (e) {} // PS2WEB(18): deterministic golden
     const fps = dt > 0 ? frames / dt : 0;
     metrics.fps = Math.round(fps * 100) / 100;
     metrics.emuSpeedPct = Math.round((fps / TARGET_FPS) * 1000) / 10;

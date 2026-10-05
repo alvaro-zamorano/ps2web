@@ -1,0 +1,43 @@
+diff --git a/Source/ui_js/Main.cpp b/Source/ui_js/Main.cpp
+index 675d7139..1c7a0afc 100644
+--- a/Source/ui_js/Main.cpp
++++ b/Source/ui_js/Main.cpp
+@@ -61,6 +61,13 @@ extern std::atomic<uint64_t> g_ps2webIopExecNs; // PS2WEB(15), BasicBlock.cpp
+ static std::atomic<int> g_ps2webVmReady{0};
+ static std::atomic<uint32_t> g_ps2webVblanks{0}; // PS2WEB(15)
+ CPS2VM::NewFrameEvent::Connection g_ps2webVblankConnection;
++// PS2WEB(18): deterministic golden. getStateHashAtN() snapshots EE RAM from the GS thread's
++// OnNewFrame while the EE keeps running, so its value depends on host thread timing (4 different values
++// seen on the same build). This one snapshots on the EMU thread itself, at the VM's
++// vblank-start N (between EE time slices), so it only depends on emulated time.
++static std::atomic<uint32_t> g_ps2webVblanksDet{0};
++static std::atomic<uint32_t> g_ps2webStateHashAtVblankN{0};
++CPS2VM::NewFrameEvent::Connection g_ps2webDetHashConnection;
+ extern "C" void initVmPhase2();
+ extern "C" void initVm()
+ {
+@@ -175,6 +182,10 @@ extern "C" void initVmPhase2()
+ 	// PS2WEB(15): count VM vblanks. "fps" (GS flips) undercounts speed for games that present every
+ 	// other vblank; vblanks/s vs the CRT rate (50 PAL / 60 NTSC) is the true emulation speed.
+ 	g_ps2webVblankConnection = g_virtualMachine->OnNewFrame.Connect([]() { g_ps2webVblanks.fetch_add(1, std::memory_order_relaxed); });
++	g_ps2webDetHashConnection = g_virtualMachine->OnNewFrame.Connect([]() {
++		uint32 n = g_ps2webVblanksDet.fetch_add(1, std::memory_order_relaxed) + 1;
++		if(n == PS2WEB_STATE_FRAME) g_ps2webStateHashAtVblankN.store(static_cast<uint32>(getStateHash()), std::memory_order_relaxed);
++	});
+ 	// PS2WEB(15): time the IOP JIT (runs on the EE thread, was invisible in the profile).
+ 	if(auto iopExec = dynamic_cast<CGenericMipsExecutor<BlockLookupOneWay>*>(g_virtualMachine->m_iop->m_cpu.m_executor.get())) iopExec->m_ps2webExecNs = &g_ps2webIopExecNs;
+ 
+@@ -328,6 +339,7 @@ int getChainTableMismatches() { std::lock_guard<std::mutex> _l(g_ps2webChainMapM
+ // canvas frameHash as the JIT correctness gate. Read-only; any CPU divergence changes it.
+ int getTotalFrames() { return static_cast<int>(g_ps2webTotalFrames.load()); }
+ double getStateHashAtN() { return static_cast<double>(g_ps2webStateHashAtN.load()); }
++double getStateHashAtVblankN() { return static_cast<double>(g_ps2webStateHashAtVblankN.load()); } // PS2WEB(18)
+ double getStateHash() {
+ 	if(!g_virtualMachine) return 0;
+ 	auto& ee = g_virtualMachine->m_ee;
+@@ -396,4 +408,5 @@ EMSCRIPTEN_BINDINGS(Play)
+ 	function("getStateHash", &getStateHash);
+ 	function("getTotalFrames", &getTotalFrames);
+ 	function("getStateHashAtN", &getStateHashAtN);
++	function("getStateHashAtVblankN", &getStateHashAtVblankN);
+ }

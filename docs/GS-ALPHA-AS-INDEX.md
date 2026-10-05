@@ -52,17 +52,16 @@ con el **rojo** (basura) en vez del alfa.
 | Misma prueba con la build **de producción** (sin patch 17) | 3049433245 en 3 de 5 runs; el resto 545571455 |
 | Consola al arrancar el cube (base vs 17) | 0 errores en ambos; render idéntico salvo la rotación |
 
-## Hallazgos colaterales (abiertos)
-1. **El golden es bimodal en este entorno** (2 cores, SwiftShader): `stateHashAtN` sale 3049433245 o
-   545571455 con el mismo wasm y el mismo ELF. Es preexistente (le pasa a la build de producción).
-   Hipótesis: el EE del cube depende del ritmo del hilo GS en torno al frame 180; con más cores (CI)
-   saldría casi siempre el valor golden. Hasta arreglarlo: ante un rojo del golden, re-run antes de concluir.
-2. **Deriva del fixture**: el job `fixtures` compila `cube.elf` con `ps2dev/ps2dev:latest`. La imagen
-   actual (digest `sha256:06ace705…`) genera otro binario (sha1 `bc1082f9…`, 174644 bytes) cuyo
-   hash en el frame 180 no es el golden (y además varía entre runs). Previsiblemente el CI se pondrá rojo
-   por esto aunque el código no cambie.
-   Arreglo: fijar la imagen por digest o versionar los ELF de `tests/fixtures` (ambos tocan
-   `.github/workflows/build.yml`).
+## Hallazgos colaterales
+1. **El golden era bimodal** (de hecho, 4 valores con el mismo wasm y el mismo ELF, también en el CI:
+   el run #74 de `main` dio 545571455 con el árbol que en la PR dio el golden). Causa: el hash se tomaba
+   en el hilo GS mientras el EE seguía corriendo. **Resuelto en el patch 18**: el gate usa
+   `stateHashAtVblankN` (snapshot en el hilo de emulación en el vblank 180), 562736285 en 21/21 runs y
+   en los 4 modos de batching.
+2. **Deriva del fixture** (`ps2dev/ps2dev:latest` re-publicada el 2026-10-03 genera otro `cube.elf`).
+   **Resuelto** en el workflow: la imagen va fijada por el digest del último run verde
+   (`sha256:2d79add6…`, reproduce `cube.elf` 974e20b3 y `vu1.elf` d6daa9d7 byte a byte) y el job
+   comprueba el SHA-1 y falla si cambia.
 3. `SetRenderingContext` compara `SHADERCAPS` como `uint32` aunque usa 35 bits: cambios solo en
    `alphaFailMethod` (bit alto) o `alphaTestDepthTest*_DepthFetch` no cambian de shader. Bug upstream;
    candidato a patch aparte con su propia validación.
